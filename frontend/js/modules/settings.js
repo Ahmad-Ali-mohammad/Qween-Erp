@@ -243,6 +243,28 @@ async function renderSystemSettings() {
           <div class="actions" style="grid-column:1 / -1;"><button class="btn btn-primary" type="submit">حفظ إعدادات النظام</button></div>
         </form>
       </div>
+
+      <div class="card">
+        <h3>بيانات تجريبية للوحة التحكم (3 سنوات)</h3>
+        <p class="muted">تستخدم هذه الأدوات لملء قاعدة البيانات ببيانات اختبار شاملة أو تنظيفها. سيتم الاحتفاظ بالمستخدمين والأدوار وإعدادات النظام الأساسية.</p>
+        <div class="actions" style="margin-bottom:10px;">
+          <button id="demo-import-default" class="btn btn-success" type="button">استيراد النسخة التجريبية الافتراضية</button>
+          <button id="demo-download-file" class="btn btn-secondary" type="button">تنزيل ملف البيانات التجريبية</button>
+        </div>
+        <div class="grid-2" style="margin-bottom:10px;">
+          <div>
+            <label>استيراد من ملف JSON</label>
+            <input id="demo-file-input" type="file" accept=".json,application/json" />
+          </div>
+          <div style="display:flex;align-items:end;">
+            <button id="demo-import-file" class="btn btn-info" type="button">استيراد من الملف</button>
+          </div>
+        </div>
+        <div class="actions">
+          <button id="demo-purge-all" class="btn btn-danger" type="button">حذف جميع البيانات التشغيلية</button>
+        </div>
+        <div id="demo-op-result" class="muted" style="margin-top:12px;"></div>
+      </div>
     `;
 
     document.getElementById('system-form').addEventListener('submit', async (event) => {
@@ -256,6 +278,82 @@ async function renderSystemSettings() {
       };
       await withToast(() => request('/settings/system', { method: 'PUT', body: JSON.stringify(payload) }), 'تم حفظ إعدادات النظام');
       await load();
+    });
+
+    const setDemoResult = (html) => {
+      const el = document.getElementById('demo-op-result');
+      if (el) el.innerHTML = html;
+    };
+
+    const summarizeImport = (summary) => `
+      <div class="success">
+        <strong>تم تنفيذ العملية بنجاح.</strong>
+      </div>
+      <div class="grid-3" style="margin-top:8px;">
+        <div class="kpi"><div>السنوات</div><div class="val">${summary.years ?? 0}</div></div>
+        <div class="kpi"><div>الفترات</div><div class="val">${summary.periods ?? 0}</div></div>
+        <div class="kpi"><div>العملاء</div><div class="val">${summary.customers ?? 0}</div></div>
+        <div class="kpi"><div>الموردين</div><div class="val">${summary.suppliers ?? 0}</div></div>
+        <div class="kpi"><div>الأصناف</div><div class="val">${summary.items ?? 0}</div></div>
+        <div class="kpi"><div>الأصول</div><div class="val">${summary.assets ?? 0}</div></div>
+        <div class="kpi"><div>الفواتير</div><div class="val">${summary.invoices ?? 0}</div></div>
+        <div class="kpi"><div>المدفوعات</div><div class="val">${summary.payments ?? 0}</div></div>
+        <div class="kpi"><div>القيود</div><div class="val">${summary.journals ?? 0}</div></div>
+      </div>
+    `;
+
+    document.getElementById('demo-import-default')?.addEventListener('click', async () => {
+      setDemoResult('جاري الاستيراد...');
+      const result = await withToast(
+        () => request('/settings/demo-data/import-default', { method: 'POST', body: JSON.stringify({ purgeFirst: true }) }),
+        'تم استيراد البيانات التجريبية'
+      );
+      setDemoResult(summarizeImport(result.data || {}));
+    });
+
+    document.getElementById('demo-download-file')?.addEventListener('click', async () => {
+      const res = await withToast(() => request('/settings/demo-data/file'), 'تم تجهيز الملف');
+      const data = res?.data?.data || {};
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = 'demo-data-3y.json';
+      link.click();
+      URL.revokeObjectURL(url);
+    });
+
+    document.getElementById('demo-import-file')?.addEventListener('click', async () => {
+      setDemoResult('جاري قراءة الملف والاستيراد...');
+      const result = await withToast(async () => {
+        const input = document.getElementById('demo-file-input');
+        const file = input?.files?.[0];
+        if (!file) throw new Error('اختر ملف JSON أولاً');
+
+        const text = await file.text();
+        let parsed = null;
+        try {
+          parsed = JSON.parse(text);
+        } catch {
+          throw new Error('الملف ليس بصيغة JSON صحيحة');
+        }
+
+        return request('/settings/demo-data/import', { method: 'POST', body: JSON.stringify({ purgeFirst: true, data: parsed }) });
+      }, 'تم استيراد البيانات من الملف');
+      setDemoResult(summarizeImport(result.data || {}));
+    });
+
+    document.getElementById('demo-purge-all')?.addEventListener('click', async () => {
+      const sure = await confirmAction('سيتم حذف جميع البيانات التشغيلية الحالية. هل تريد المتابعة؟');
+      if (!sure) return;
+      const phrase = window.prompt('للتأكيد النهائي اكتب العبارة التالية بالضبط: DELETE ALL') || '';
+
+      setDemoResult('جاري حذف البيانات التشغيلية...');
+      await withToast(
+        () => request('/settings/demo-data/purge', { method: 'POST', body: JSON.stringify({ confirm: phrase }) }),
+        'تم حذف البيانات التشغيلية'
+      );
+      setDemoResult('<div class="success"><strong>تم حذف البيانات التشغيلية بنجاح.</strong></div>');
     });
 
     setPageActions({

@@ -1,0 +1,375 @@
+{
+  "version": "1.0.0",
+  "currency": "SAR",
+  "years": [
+    2024,
+    2025,
+    2026
+  ],
+  "customersCount": 18,
+  "suppliersCount": 12,
+  "itemsCount": 24,
+  "assetsCount": 30,
+  "monthly": [
+    {
+      "period": "2024-01",
+      "sales": 66428,
+      "expenses": 47163.88,
+      "draftEntries": 1,
+      "pendingPayments": 2,
+      "openTasks": 5,
+      "openTickets": 1,
+      "pendingLeaves": 1
+    },
+    {
+      "period": "2024-02",
+      "sales": 67155.39,
+      "expenses": 47680.33,
+      "draftEntries": 1,
+      "pendingPayments": 3,
+      "openTasks": 3,
+      "openTickets": 1,
+      "pendingLeaves": 1
+    },
+    {
+      "period": "2024-03",
+      "sales": 72910.4,
+      "expenses": 45933.55,
+      "draftEntries": 1,
+      "pendingPayments": 3,
+      "openTasks": 5,
+      "openTickets": 1,
+      "pendingLeaves": 0
+    },
+    {
+      "period": "2024-04",
+      "sales": 68748.17,
+      "expenses": 41936.38,
+      "draftEntries": 1,
+      "pendingPayments": 2,
+      "openTasks": 5,
+      "openTickets": 1,
+      "pendingLeaves": 1
+    },
+    {
+      "period": "2024-05",
+      "sales": 66808,
+      "expenses": 38080.56,
+      "draftEntries": 1,
+      "pendingPayments": 1,
+      "openTasks": 3,
+      "openTickets": 1,
+      "pendingLeaves": 0
+    },
+    {
+      "period": "2024-06",
+      "sales": 62682,
+      "expenses": 39489.66,
+      "draftEntries": 1,
+      "pendingPayments": 3,
+      "openTasks": 2,
+      "openTickets": 1,
+      "pendingLeaves": 0
+    },
+    {
+      "period": "2024-07",
+      "sales": 64463.6,
+      "expenses": 41901.34,
+      "draftEntries": 1,
+      "pendingPayments": 2,
+      "openTasks": 4,
+      "openTickets": 1,
+      "pendingLeaves": 1
+    },
+    {
+      "period": "2024-08",
+      "sales": 55737.47,
+      "expenses": 36229.36,
+      "draftEntries": 1,
+      "pendingPayments": 3,
+      "openTasks": 1,
+      "openTickets": 1,
+      "pendingLeaves": 0
+    },
+    {
+      "period": "2024-09",
+      "sales": 55451.2,
+      "expenses": 40479.38,
+      "draftEntries": 1,
+      "pendingPayments": 1,
+      "openTasks": 2,
+      "openTickets": 1,
+      "pendingLeaves": 1
+    },
+    {
+      "period": "2024-10",
+      "sales": 60699.89,
+      "expenses": 35812.94,
+      "draftEntries": 1,
+      "pendingPayments": 2,
+      "openTasks": 1,
+      "openTickets": 1,
+      "pendingLeaves": 0
+    },
+    {
+      "period": "2024-11",
+      "sales": 67818,
+      "expenses": 48150.78,
+      "draftEntries": 1,
+      "pendingPayments": 2,
+      "openTasks": 5,
+      "openTickets": 1,
+      "pendingLeaves": 0
+    },
+    {
+      "period": "2024-12",
+      "sales": 71578.8,
+      "expenses": 45094.64,
+      "draftEntries": 1,
+      "pendingPayments": 1,
+      "openTasks": 4,
+      "openTickets": 1,
+      "pendingLeaves": 1
+    },
+    {
+      "period": "2025-01",
+      "sales": 74128,
+      "expenses": 49665.76,
+      "draftEntries": 1,
+      "pendingPayments": 2,
+      "openTasks": 4,
+      "openTickets": 1,
+      "pendingLeaves": 0
+    },
+    {
+      "period": "2025-02",
+      "sales": 81176.07,
+      "expenses": 54387.97,
+      "draftEntries": 1,
+      "pendingPayments": 1,
+      "openTasks": 1,
+      "openTickets": 1,
+      "pendingLeaves": 1
+    },
+    {
+      "period": "2025-03",
+      "sales": 85724.8,
+      "expenses": 50577.63,
+      "draftEntries": 1,
+      "pendingPayments": 2,
+      "openTasks": 4,
+      "openTickets": 1,
+      "pendingLeaves": 0
+    },
+    {
+      "period": "2025-04",
+      "sales": 80728.85,
+      "expenses": 50859.18,
+      "draftEntries": 1,
+      "pendingPayments": 3,
+      "openTasks": 3,
+      "openTickets": 1,
+      "pendingLeaves": 1
+    },
+    {
+      "period": "2025-05",
+      "sales": 75908,
+      "expenses": 55412.84,
+      "draftEntries": 1,
+      "pendingPayments": 2,
+      "openTasks": 4,
+      "openTickets": 1,
+      "pendingLeaves": 0
+    },
+    {
+      "period": "2025-06",
+      "sales": 72795.6,
+      "expenses": 45861.23,
+      "draftEntries": 1,
+      "pendingPayments": 2,
+      "openTasks": 3,
+      "openTickets": 1,
+      "pendingLeaves": 0
+    },
+    {
+      "period": "2025-07",
+      "sales": 74526.8,
+      "expenses": 42480.28,
+      "draftEntries": 1,
+      "pendingPayments": 1,
+      "openTasks": 3,
+      "openTickets": 1,
+      "pendingLeaves": 0
+    },
+    {
+      "period": "2025-08",
+      "sales": 68831.99,
+      "expenses": 47494.07,
+      "draftEntries": 1,
+      "pendingPayments": 2,
+      "openTasks": 4,
+      "openTickets": 1,
+      "pendingLeaves": 0
+    },
+    {
+      "period": "2025-09",
+      "sales": 69928,
+      "expenses": 45453.2,
+      "draftEntries": 1,
+      "pendingPayments": 1,
+      "openTasks": 4,
+      "openTickets": 1,
+      "pendingLeaves": 1
+    },
+    {
+      "period": "2025-10",
+      "sales": 72194.41,
+      "expenses": 46926.37,
+      "draftEntries": 1,
+      "pendingPayments": 2,
+      "openTasks": 5,
+      "openTickets": 1,
+      "pendingLeaves": 0
+    },
+    {
+      "period": "2025-11",
+      "sales": 72049.2,
+      "expenses": 52595.92,
+      "draftEntries": 1,
+      "pendingPayments": 2,
+      "openTasks": 4,
+      "openTickets": 1,
+      "pendingLeaves": 0
+    },
+    {
+      "period": "2025-12",
+      "sales": 80732.4,
+      "expenses": 50861.41,
+      "draftEntries": 1,
+      "pendingPayments": 2,
+      "openTasks": 5,
+      "openTickets": 1,
+      "pendingLeaves": 0
+    },
+    {
+      "period": "2026-01",
+      "sales": 91908,
+      "expenses": 52387.56,
+      "draftEntries": 1,
+      "pendingPayments": 2,
+      "openTasks": 4,
+      "openTickets": 1,
+      "pendingLeaves": 1
+    },
+    {
+      "period": "2026-02",
+      "sales": 92660.75,
+      "expenses": 54669.84,
+      "draftEntries": 1,
+      "pendingPayments": 1,
+      "openTasks": 3,
+      "openTickets": 1,
+      "pendingLeaves": 0
+    },
+    {
+      "period": "2026-03",
+      "sales": 96539.2,
+      "expenses": 55027.34,
+      "draftEntries": 1,
+      "pendingPayments": 2,
+      "openTasks": 4,
+      "openTickets": 1,
+      "pendingLeaves": 1
+    },
+    {
+      "period": "2026-04",
+      "sales": 93381.53,
+      "expenses": 62565.63,
+      "draftEntries": 1,
+      "pendingPayments": 1,
+      "openTasks": 2,
+      "openTickets": 1,
+      "pendingLeaves": 0
+    },
+    {
+      "period": "2026-05",
+      "sales": 93328,
+      "expenses": 60663.2,
+      "draftEntries": 1,
+      "pendingPayments": 1,
+      "openTasks": 4,
+      "openTickets": 1,
+      "pendingLeaves": 0
+    },
+    {
+      "period": "2026-06",
+      "sales": 85517.2,
+      "expenses": 48744.8,
+      "draftEntries": 1,
+      "pendingPayments": 1,
+      "openTasks": 2,
+      "openTickets": 1,
+      "pendingLeaves": 0
+    },
+    {
+      "period": "2026-07",
+      "sales": 85046,
+      "expenses": 58681.74,
+      "draftEntries": 1,
+      "pendingPayments": 2,
+      "openTasks": 1,
+      "openTickets": 1,
+      "pendingLeaves": 1
+    },
+    {
+      "period": "2026-08",
+      "sales": 75270.51,
+      "expenses": 53442.06,
+      "draftEntries": 1,
+      "pendingPayments": 3,
+      "openTasks": 2,
+      "openTickets": 1,
+      "pendingLeaves": 1
+    },
+    {
+      "period": "2026-09",
+      "sales": 81084.8,
+      "expenses": 57570.21,
+      "draftEntries": 1,
+      "pendingPayments": 3,
+      "openTasks": 5,
+      "openTickets": 1,
+      "pendingLeaves": 1
+    },
+    {
+      "period": "2026-10",
+      "sales": 79152.93,
+      "expenses": 57781.64,
+      "draftEntries": 1,
+      "pendingPayments": 3,
+      "openTasks": 1,
+      "openTickets": 1,
+      "pendingLeaves": 0
+    },
+    {
+      "period": "2026-11",
+      "sales": 84872.4,
+      "expenses": 48377.27,
+      "draftEntries": 1,
+      "pendingPayments": 1,
+      "openTasks": 4,
+      "openTickets": 1,
+      "pendingLeaves": 0
+    },
+    {
+      "period": "2026-12",
+      "sales": 92262,
+      "expenses": 56279.82,
+      "draftEntries": 1,
+      "pendingPayments": 2,
+      "openTasks": 3,
+      "openTickets": 1,
+      "pendingLeaves": 0
+    }
+  ]
+}

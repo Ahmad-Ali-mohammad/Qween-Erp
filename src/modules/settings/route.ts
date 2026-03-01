@@ -7,6 +7,12 @@ import { validateBody } from '../../middleware/validate';
 import { PERMISSIONS } from '../../constants/permissions';
 import { Errors, ok } from '../../utils/response';
 import { parsePostingAccounts } from '../shared/posting-accounts';
+import {
+  readDemoDataFile,
+  purgeAndImportDemoData,
+  purgeAllOperationalData,
+  getDemoFilePath
+} from '../demo-data/service';
 
 const companySchema = z.object({
   nameAr: z.string().min(2).optional(),
@@ -101,6 +107,44 @@ router.put('/system', requirePermissions(PERMISSIONS.SETTINGS_WRITE), validateBo
       create: { id: 1, ...req.body, postingAccounts }
     });
     ok(res, settings);
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get('/demo-data/file', requirePermissions(PERMISSIONS.SETTINGS_READ), async (_req, res, next) => {
+  try {
+    const data = await readDemoDataFile();
+    ok(res, { filePath: getDemoFilePath(), data });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post('/demo-data/import-default', requirePermissions(PERMISSIONS.SETTINGS_WRITE), async (req, res, next) => {
+  try {
+    const payload = await readDemoDataFile();
+    const summary = await purgeAndImportDemoData(payload, { purgeFirst: req.body?.purgeFirst !== false });
+    ok(res, summary);
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post('/demo-data/import', requirePermissions(PERMISSIONS.SETTINGS_WRITE), async (req, res, next) => {
+  try {
+    const payload = req.body?.data ?? req.body;
+    const summary = await purgeAndImportDemoData(payload, { purgeFirst: req.body?.purgeFirst !== false });
+    ok(res, summary);
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post('/demo-data/purge', requirePermissions(PERMISSIONS.BACKUP_WRITE), async (req, res, next) => {
+  try {
+    const result = await purgeAllOperationalData(String(req.body?.confirm ?? ''));
+    ok(res, result);
   } catch (error) {
     next(error);
   }
