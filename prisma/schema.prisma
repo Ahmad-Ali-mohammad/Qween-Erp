@@ -1,0 +1,1212 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum AccountType {
+  ASSET
+  LIABILITY
+  EQUITY
+  REVENUE
+  EXPENSE
+}
+
+enum JournalSource {
+  MANUAL
+  SALES
+  PURCHASE
+  PAYROLL
+  ASSETS
+  REVERSAL
+}
+
+enum JournalStatus {
+  DRAFT
+  PENDING
+  POSTED
+  VOID
+  REVERSED
+}
+
+enum InvoiceType {
+  SALES
+  PURCHASE
+}
+
+enum InvoiceStatus {
+  DRAFT
+  ISSUED
+  PAID
+  PARTIAL
+  CANCELLED
+}
+
+enum PaymentType {
+  RECEIPT
+  PAYMENT
+}
+
+enum PaymentMethod {
+  CASH
+  BANK_TRANSFER
+  CHECK
+  CARD
+}
+
+enum PaymentStatus {
+  PENDING
+  COMPLETED
+  CANCELLED
+  BOUNCED
+}
+
+enum FiscalYearStatus {
+  OPEN
+  CLOSED
+  ADJUSTING
+}
+
+enum PeriodStatus {
+  OPEN
+  CLOSED
+}
+
+enum AssetStatus {
+  ACTIVE
+  MAINTENANCE
+  SOLD
+  SCRAPPED
+}
+
+enum BudgetStatus {
+  DRAFT
+  ACTIVE
+  CLOSED
+}
+
+enum BudgetControlLevel {
+  NONE
+  WARNING
+  HARD
+}
+
+enum TaxType {
+  VAT
+  WHT
+}
+
+enum TaxDeclarationStatus {
+  DRAFT
+  FILED
+  PAID
+  CANCELLED
+}
+
+model CompanyProfile {
+  id                      Int      @id @default(1)
+  nameAr                  String
+  nameEn                  String?
+  commercialRegistration  String?
+  taxNumber               String?
+  vatNumber               String?
+  address                 String?
+  city                    String?
+  phone                   String?
+  email                   String?
+  logo                    String?
+  fiscalYearStartMonth    Int      @default(1)
+  currency                String   @default("SAR")
+  updatedAt               DateTime @updatedAt
+}
+
+model SystemSettings {
+  id                 Int      @id @default(1)
+  allowNegativeStock Boolean  @default(false)
+  requireApproval    Boolean  @default(true)
+  approvalThreshold  Decimal  @default(10000)
+  invoicePrefix      String   @default("INV")
+  quotePrefix        String   @default("QT")
+  postingAccounts    Json     @default("{}")
+  updatedAt          DateTime @updatedAt
+}
+
+model Role {
+  id          Int      @id @default(autoincrement())
+  name        String   @unique
+  nameAr      String
+  description String?
+  permissions Json     @default("{}")
+  isSystem    Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  users User[]
+}
+
+model User {
+  id               Int      @id @default(autoincrement())
+  username         String   @unique
+  email            String   @unique
+  password         String
+  fullName         String
+  phone            String?
+  position         String?
+  roleId           Int
+  role             Role     @relation(fields: [roleId], references: [id])
+  isActive         Boolean  @default(true)
+  failedLoginCount Int      @default(0)
+  lockedUntil      DateTime?
+  lastLogin        DateTime?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  sessions         AuthSession[]
+  journalsCreated  JournalEntry[] @relation("CreatedBy")
+  journalsPosted   JournalEntry[] @relation("PostedBy")
+  invoicesCreated  Invoice[]      @relation("InvoiceCreatedBy")
+  paymentsCreated  Payment[]      @relation("PaymentCreatedBy")
+  auditLogs        AuditLog[]
+}
+
+model AuthSession {
+  id           Int      @id @default(autoincrement())
+  userId        Int
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  refreshToken  String   @unique
+  expiresAt     DateTime
+  revokedAt     DateTime?
+  createdAt     DateTime @default(now())
+
+  @@index([userId])
+}
+
+model Account {
+  id            Int         @id @default(autoincrement())
+  code          String      @unique
+  nameAr        String
+  nameEn        String?
+  type          AccountType
+  subType       String?
+  parentId      Int?
+  parent        Account?    @relation("AccountHierarchy", fields: [parentId], references: [id])
+  children      Account[]   @relation("AccountHierarchy")
+  level         Int         @default(1)
+  isControl     Boolean     @default(false)
+  allowPosting  Boolean     @default(true)
+  normalBalance String      @default("Debit")
+  isActive      Boolean     @default(true)
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  journalLines  JournalLine[]
+  balances      AccountBalance[]
+  budgetLines   BudgetLine[]
+  bankAccounts  BankAccount[] @relation("BankGLAccount")
+}
+
+model AccountBalance {
+  id             Int      @id @default(autoincrement())
+  accountId      Int
+  account        Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  fiscalYear     Int
+  period         Int
+  openingBalance Decimal  @default(0)
+  debit          Decimal  @default(0)
+  credit         Decimal  @default(0)
+  closingBalance Decimal  @default(0)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([accountId, fiscalYear, period])
+  @@index([fiscalYear, period])
+}
+
+model FiscalYear {
+  id        Int              @id @default(autoincrement())
+  name      String           @unique
+  startDate DateTime
+  endDate   DateTime
+  status    FiscalYearStatus @default(OPEN)
+  isCurrent Boolean          @default(false)
+  createdAt DateTime         @default(now())
+
+  periods AccountingPeriod[]
+}
+
+model AccountingPeriod {
+  id           Int         @id @default(autoincrement())
+  fiscalYearId Int
+  fiscalYear   FiscalYear  @relation(fields: [fiscalYearId], references: [id], onDelete: Cascade)
+  number       Int
+  name         String
+  startDate    DateTime
+  endDate      DateTime
+  status       PeriodStatus @default(OPEN)
+  canPost      Boolean      @default(true)
+  closedAt     DateTime?
+  closedBy     Int?
+
+  journalEntries JournalEntry[]
+
+  @@unique([fiscalYearId, number])
+  @@index([startDate, endDate])
+}
+
+model JournalEntry {
+  id              Int           @id @default(autoincrement())
+  entryNumber     String        @unique
+  date            DateTime
+  periodId        Int?
+  period          AccountingPeriod? @relation(fields: [periodId], references: [id])
+  description     String?
+  reference       String?
+  source          JournalSource @default(MANUAL)
+  status          JournalStatus @default(DRAFT)
+  totalDebit      Decimal       @default(0)
+  totalCredit     Decimal       @default(0)
+  attachmentCount Int           @default(0)
+  notes           String?
+  createdById     Int
+  createdBy       User          @relation("CreatedBy", fields: [createdById], references: [id])
+  postedById      Int?
+  postedBy        User?         @relation("PostedBy", fields: [postedById], references: [id])
+  postedAt        DateTime?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  lines             JournalLine[]
+  invoiceLinks      Invoice[] @relation("InvoiceJournalEntry")
+  paymentLinks      Payment[] @relation("PaymentJournalEntry")
+  bankTxnLinks      BankTransaction[] @relation("BankTxnJournalEntry")
+  depreciationLinks DepreciationSchedule[] @relation("DepScheduleJournalEntry")
+
+  @@index([date, status])
+  @@index([createdAt])
+}
+
+model JournalLine {
+  id            Int      @id @default(autoincrement())
+  entryId        Int
+  entry          JournalEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  lineNumber     Int
+  accountId      Int
+  account        Account  @relation(fields: [accountId], references: [id])
+  description    String?
+  debit          Decimal  @default(0)
+  credit         Decimal  @default(0)
+  projectId      Int?
+  project        Project? @relation(fields: [projectId], references: [id])
+  departmentId   Int?
+  department     Department? @relation(fields: [departmentId], references: [id])
+  costCenterId   Int?
+  costCenter     CostCenter? @relation(fields: [costCenterId], references: [id])
+  employeeId     Int?
+  isCleared      Boolean  @default(false)
+  clearedAt      DateTime?
+  createdAt      DateTime @default(now())
+
+  @@unique([entryId, lineNumber])
+  @@index([accountId])
+}
+
+model Project {
+  id          Int      @id @default(autoincrement())
+  code        String   @unique
+  nameAr      String
+  nameEn      String?
+  type        String?
+  status      String   @default("Active")
+  startDate   DateTime?
+  endDate     DateTime?
+  budget      Decimal?
+  actualCost  Decimal  @default(0)
+  managerId   Int?
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  journalLines JournalLine[]
+  invoices     Invoice[]
+}
+
+model Department {
+  id          Int      @id @default(autoincrement())
+  code        String   @unique
+  nameAr      String
+  nameEn      String?
+  parentId    Int?
+  parent      Department? @relation("DeptHierarchy", fields: [parentId], references: [id])
+  children    Department[] @relation("DeptHierarchy")
+  managerId   Int?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  journalLines JournalLine[]
+}
+
+model CostCenter {
+  id          Int      @id @default(autoincrement())
+  code        String   @unique
+  nameAr      String
+  nameEn      String?
+  budget      Decimal?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  journalLines JournalLine[]
+}
+
+model Customer {
+  id             Int      @id @default(autoincrement())
+  code           String   @unique
+  nameAr         String
+  nameEn         String?
+  type           String   @default("Company")
+  nationalId     String?
+  taxNumber      String?
+  vatNumber      String?
+  address        String?
+  city           String?
+  phone          String?
+  mobile         String?
+  email          String?
+  creditLimit    Decimal  @default(0)
+  currentBalance Decimal  @default(0)
+  paymentTerms   Int      @default(30)
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  invoices Invoice[]
+  payments Payment[]
+  contacts Contact[]
+}
+
+model Supplier {
+  id             Int      @id @default(autoincrement())
+  code           String   @unique
+  nameAr         String
+  nameEn         String?
+  type           String   @default("Local")
+  nationalId     String?
+  taxNumber      String?
+  vatNumber      String?
+  address        String?
+  city           String?
+  phone          String?
+  mobile         String?
+  email          String?
+  creditLimit    Decimal  @default(0)
+  currentBalance Decimal  @default(0)
+  paymentTerms   Int      @default(30)
+  bankName       String?
+  bankAccount    String?
+  iban           String?
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  invoices Invoice[]
+  payments Payment[]
+  contacts Contact[]
+}
+
+model Contact {
+  id         Int      @id @default(autoincrement())
+  customerId Int?
+  customer   Customer? @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  supplierId Int?
+  supplier   Supplier? @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  name       String
+  position   String?
+  phone      String?
+  mobile     String?
+  email      String?
+  isPrimary  Boolean  @default(false)
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+
+  @@index([customerId])
+  @@index([supplierId])
+}
+
+model Invoice {
+  id               Int          @id @default(autoincrement())
+  number           String       @unique
+  type             InvoiceType
+  date             DateTime
+  dueDate          DateTime?
+  customerId       Int?
+  customer         Customer?    @relation(fields: [customerId], references: [id])
+  supplierId       Int?
+  supplier         Supplier?    @relation(fields: [supplierId], references: [id])
+  subtotal         Decimal      @default(0)
+  discount         Decimal      @default(0)
+  taxableAmount    Decimal      @default(0)
+  vatRate          Decimal      @default(15)
+  vatAmount        Decimal      @default(0)
+  withholdingTax   Decimal      @default(0)
+  total            Decimal      @default(0)
+  paidAmount       Decimal      @default(0)
+  outstanding      Decimal      @default(0)
+  status           InvoiceStatus @default(DRAFT)
+  paymentStatus    String       @default("PENDING")
+  projectId        Int?
+  project          Project?     @relation(fields: [projectId], references: [id])
+  notes            String?
+  internalNotes    String?
+  zatcaUuid        String?
+  zatcaHash        String?
+  zatcaQr          String?
+  isZatcaCompliant Boolean      @default(false)
+  createdById      Int?
+  createdBy        User?        @relation("InvoiceCreatedBy", fields: [createdById], references: [id])
+  journalEntryId   Int?
+  journalEntry     JournalEntry? @relation("InvoiceJournalEntry", fields: [journalEntryId], references: [id])
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  lines    InvoiceLine[]
+  payments PaymentAllocation[]
+
+  @@index([date, status])
+  @@index([createdAt])
+}
+
+model InvoiceLine {
+  id          Int      @id @default(autoincrement())
+  invoiceId   Int
+  invoice     Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  lineNumber  Int
+  itemId      Int?
+  description String
+  quantity    Decimal  @default(1)
+  unitPrice   Decimal
+  discount    Decimal  @default(0)
+  taxRate     Decimal  @default(15)
+  taxAmount   Decimal  @default(0)
+  total       Decimal
+  accountId   Int?
+  createdAt   DateTime @default(now())
+
+  @@unique([invoiceId, lineNumber])
+}
+
+model BankAccount {
+  id             Int      @id @default(autoincrement())
+  name           String
+  accountNumber  String   @unique
+  iban           String?
+  bankName       String
+  currency       String   @default("SAR")
+  accountType    String   @default("Current")
+  openingBalance Decimal  @default(0)
+  currentBalance Decimal  @default(0)
+  glAccountId    Int?
+  glAccount      Account? @relation("BankGLAccount", fields: [glAccountId], references: [id])
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  transactions BankTransaction[]
+  payments     Payment[]
+}
+
+model BankTransaction {
+  id            Int      @id @default(autoincrement())
+  bankId        Int
+  bank          BankAccount @relation(fields: [bankId], references: [id], onDelete: Cascade)
+  date          DateTime
+  valueDate     DateTime?
+  reference     String?
+  description   String
+  debit         Decimal  @default(0)
+  credit        Decimal  @default(0)
+  balance       Decimal?
+  type          String?
+  counterparty  String?
+  isReconciled  Boolean  @default(false)
+  reconciledAt  DateTime?
+  journalEntryId Int?
+  journalEntry  JournalEntry? @relation("BankTxnJournalEntry", fields: [journalEntryId], references: [id])
+  createdAt     DateTime @default(now())
+
+  @@index([date])
+}
+
+model Payment {
+  id            Int          @id @default(autoincrement())
+  number        String       @unique
+  date          DateTime
+  type          PaymentType
+  method        PaymentMethod
+  amount        Decimal
+  currency      String       @default("SAR")
+  bankId        Int?
+  bank          BankAccount? @relation(fields: [bankId], references: [id])
+  customerId    Int?
+  customer      Customer?    @relation(fields: [customerId], references: [id])
+  supplierId    Int?
+  supplier      Supplier?    @relation(fields: [supplierId], references: [id])
+  checkNumber   String?
+  checkDate     DateTime?
+  checkBank     String?
+  status        PaymentStatus @default(PENDING)
+  description   String?
+  notes         String?
+  journalEntryId Int?
+  journalEntry   JournalEntry? @relation("PaymentJournalEntry", fields: [journalEntryId], references: [id])
+  createdById   Int?
+  createdBy     User?        @relation("PaymentCreatedBy", fields: [createdById], references: [id])
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  allocations PaymentAllocation[]
+
+  @@index([date, status])
+  @@index([createdAt])
+}
+
+model PaymentAllocation {
+  id        Int      @id @default(autoincrement())
+  paymentId Int
+  payment   Payment  @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  invoiceId Int
+  invoice   Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  amount    Decimal
+  createdAt DateTime @default(now())
+
+  @@unique([paymentId, invoiceId])
+}
+
+model AssetCategory {
+  id                 Int      @id @default(autoincrement())
+  code               String   @unique
+  nameAr             String
+  nameEn             String?
+  depreciationMethod String   @default("StraightLine")
+  usefulLifeMonths   Int
+  salvagePercent     Decimal  @default(0)
+  glAssetId          Int?
+  glAccumulatedId    Int?
+  glExpenseId        Int?
+  isActive           Boolean  @default(true)
+  createdAt          DateTime @default(now())
+
+  assets FixedAsset[]
+}
+
+model FixedAsset {
+  id                     Int        @id @default(autoincrement())
+  code                   String     @unique
+  nameAr                 String
+  nameEn                 String?
+  categoryId             Int
+  category               AssetCategory @relation(fields: [categoryId], references: [id])
+  serialNumber           String?
+  model                  String?
+  manufacturer           String?
+  purchaseDate           DateTime?
+  purchaseCost           Decimal
+  supplierId             Int?
+  usefulLifeMonths       Int?
+  depreciationMethod     String?
+  salvageValue           Decimal    @default(0)
+  depreciationStart      DateTime?
+  accumulatedDepreciation Decimal   @default(0)
+  netBookValue           Decimal
+  location               String?
+  departmentId           Int?
+  custodianId            Int?
+  status                 AssetStatus @default(ACTIVE)
+  isDepreciating         Boolean    @default(true)
+  lastDepreciationDate   DateTime?
+  notes                  String?
+  createdAt              DateTime   @default(now())
+  updatedAt              DateTime   @updatedAt
+
+  depreciationSchedule DepreciationSchedule[]
+}
+
+model DepreciationSchedule {
+  id            Int      @id @default(autoincrement())
+  assetId       Int
+  asset         FixedAsset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  fiscalYear    Int
+  period        Int
+  openingNBV    Decimal  @default(0)
+  expense       Decimal  @default(0)
+  accumulated   Decimal  @default(0)
+  closingNBV    Decimal  @default(0)
+  journalEntryId Int?
+  journalEntry  JournalEntry? @relation("DepScheduleJournalEntry", fields: [journalEntryId], references: [id])
+  status        String   @default("Pending")
+  postedAt      DateTime?
+  createdAt     DateTime @default(now())
+
+  @@unique([assetId, fiscalYear, period])
+}
+
+model Budget {
+  id           Int                @id @default(autoincrement())
+  code         String             @unique
+  nameAr       String
+  nameEn       String?
+  fiscalYear   Int
+  version      String             @default("Original")
+  status       BudgetStatus       @default(DRAFT)
+  controlLevel BudgetControlLevel @default(NONE)
+  totalAmount  Decimal            @default(0)
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+
+  lines BudgetLine[]
+}
+
+model BudgetLine {
+  id        Int      @id @default(autoincrement())
+  budgetId  Int
+  budget    Budget   @relation(fields: [budgetId], references: [id], onDelete: Cascade)
+  accountId Int
+  account   Account  @relation(fields: [accountId], references: [id])
+  period    Int
+  amount    Decimal
+  actual    Decimal  @default(0)
+  committed Decimal  @default(0)
+  variance  Decimal  @default(0)
+  updatedAt DateTime @updatedAt
+
+  @@unique([budgetId, accountId, period])
+}
+
+model TaxCode {
+  id              Int      @id @default(autoincrement())
+  code            String   @unique
+  nameAr          String
+  nameEn          String?
+  type            TaxType
+  rate            Decimal
+  isRecoverable   Boolean  @default(true)
+  glPayableId     Int?
+  glRecoverableId Int?
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+}
+
+model TaxDeclaration {
+  id             Int                  @id @default(autoincrement())
+  periodStart    DateTime
+  periodEnd      DateTime
+  type           TaxType              @default(VAT)
+  totalSales     Decimal              @default(0)
+  totalPurchases Decimal              @default(0)
+  outputTax      Decimal              @default(0)
+  inputTax       Decimal              @default(0)
+  netPayable     Decimal              @default(0)
+  filedDate      DateTime?
+  filedReference String?
+  paidDate       DateTime?
+  paidReference  String?
+  status         TaxDeclarationStatus @default(DRAFT)
+  notes          String?
+  createdAt      DateTime             @default(now())
+}
+
+model AuditLog {
+  id        Int      @id @default(autoincrement())
+  userId    Int?
+  user      User?    @relation(fields: [userId], references: [id])
+  table     String
+  recordId  Int?
+  action    String
+  oldValue  Json?
+  newValue  Json?
+  ipAddress String?
+  userAgent String?
+  createdAt DateTime @default(now())
+
+  @@index([table, recordId])
+  @@index([createdAt])
+}
+
+model ItemCategory {
+  id        Int      @id @default(autoincrement())
+  code      String   @unique
+  nameAr    String
+  nameEn    String?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  items Item[]
+}
+
+model Unit {
+  id        Int      @id @default(autoincrement())
+  code      String   @unique
+  nameAr    String
+  nameEn    String?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  items Item[]
+}
+
+model Item {
+  id              Int      @id @default(autoincrement())
+  code            String   @unique
+  nameAr          String
+  nameEn          String?
+  categoryId      Int?
+  category        ItemCategory? @relation(fields: [categoryId], references: [id])
+  unitId          Int?
+  unit            Unit?    @relation(fields: [unitId], references: [id])
+  salePrice       Decimal  @default(0)
+  purchasePrice   Decimal  @default(0)
+  reorderPoint    Decimal  @default(0)
+  minStock        Decimal  @default(0)
+  maxStock        Decimal  @default(0)
+  onHandQty       Decimal  @default(0)
+  inventoryValue  Decimal  @default(0)
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model Warehouse {
+  id         Int      @id @default(autoincrement())
+  code       String   @unique
+  nameAr     String
+  location   String?
+  manager    String?
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+model WarehouseLocation {
+  id          Int      @id @default(autoincrement())
+  warehouseId Int
+  code        String
+  nameAr      String
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([warehouseId, code])
+}
+
+model StockMovement {
+  id          Int      @id @default(autoincrement())
+  date        DateTime @default(now())
+  type        String
+  reference   String?
+  itemId      Int
+  warehouseId Int
+  locationId  Int?
+  quantity    Decimal
+  unitCost    Decimal  @default(0)
+  totalCost   Decimal  @default(0)
+  notes       String?
+  createdAt   DateTime @default(now())
+}
+
+model StockBalance {
+  id          Int      @id @default(autoincrement())
+  itemId      Int
+  warehouseId Int
+  locationId  Int?
+  quantity    Decimal  @default(0)
+  avgCost     Decimal  @default(0)
+  value       Decimal  @default(0)
+  updatedAt   DateTime @updatedAt
+
+  @@unique([itemId, warehouseId, locationId])
+}
+
+model StockCount {
+  id          Int      @id @default(autoincrement())
+  number      String   @unique
+  date        DateTime @default(now())
+  warehouseId Int
+  status      String   @default("DRAFT")
+  notes       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model StockCountLine {
+  id              Int      @id @default(autoincrement())
+  stockCountId    Int
+  itemId          Int
+  theoreticalQty  Decimal  @default(0)
+  actualQty       Decimal  @default(0)
+  differenceQty   Decimal  @default(0)
+  unitCost        Decimal  @default(0)
+  differenceValue Decimal  @default(0)
+}
+
+model SalesQuote {
+  id          Int      @id @default(autoincrement())
+  number      String   @unique
+  date        DateTime @default(now())
+  customerId  Int?
+  status      String   @default("DRAFT")
+  subtotal    Decimal  @default(0)
+  discount    Decimal  @default(0)
+  taxAmount   Decimal  @default(0)
+  total       Decimal  @default(0)
+  validUntil  DateTime?
+  notes       String?
+  lines       Json?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model SalesReturn {
+  id             Int      @id @default(autoincrement())
+  number         String   @unique
+  date           DateTime @default(now())
+  customerId     Int?
+  invoiceId      Int?
+  status         String   @default("DRAFT")
+  subtotal       Decimal  @default(0)
+  taxAmount      Decimal  @default(0)
+  total          Decimal  @default(0)
+  reason         String?
+  lines          Json?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
+
+model PurchaseOrder {
+  id               Int      @id @default(autoincrement())
+  number           String   @unique
+  supplierId       Int?
+  date             DateTime @default(now())
+  expectedDate     DateTime?
+  status           String   @default("DRAFT")
+  subtotal         Decimal  @default(0)
+  discount         Decimal  @default(0)
+  taxAmount        Decimal  @default(0)
+  total            Decimal  @default(0)
+  notes            String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+}
+
+model PurchaseReturn {
+  id             Int      @id @default(autoincrement())
+  number         String   @unique
+  date           DateTime @default(now())
+  supplierId     Int?
+  invoiceId      Int?
+  status         String   @default("DRAFT")
+  subtotal       Decimal  @default(0)
+  taxAmount      Decimal  @default(0)
+  total          Decimal  @default(0)
+  reason         String?
+  lines          Json?
+  journalEntryId Int?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
+
+model PurchaseOrderLine {
+  id               Int      @id @default(autoincrement())
+  purchaseOrderId  Int
+  itemId           Int?
+  description      String?
+  quantity         Decimal  @default(1)
+  unitPrice        Decimal  @default(0)
+  discount         Decimal  @default(0)
+  taxRate          Decimal  @default(15)
+  total            Decimal  @default(0)
+}
+
+model PurchaseReceipt {
+  id               Int      @id @default(autoincrement())
+  number           String   @unique
+  purchaseOrderId  Int?
+  supplierId       Int?
+  warehouseId      Int?
+  date             DateTime @default(now())
+  status           String   @default("DRAFT")
+  notes            String?
+  lines            Json?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+}
+
+model Opportunity {
+  id               Int      @id @default(autoincrement())
+  title            String
+  customerId       Int?
+  stage            String   @default("LEAD")
+  probability      Int      @default(0)
+  expectedCloseDate DateTime?
+  value            Decimal  @default(0)
+  ownerId          Int?
+  notes            String?
+  status           String   @default("OPEN")
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+}
+
+model SupportTicket {
+  id          Int      @id @default(autoincrement())
+  number      String   @unique
+  customerId  Int?
+  subject     String
+  description String?
+  priority    String   @default("MEDIUM")
+  status      String   @default("OPEN")
+  assigneeId  Int?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model SupportTicketMessage {
+  id         Int      @id @default(autoincrement())
+  ticketId   Int
+  senderId   Int?
+  senderType String?
+  message    String
+  createdAt  DateTime @default(now())
+}
+
+model ProjectTask {
+  id          Int      @id @default(autoincrement())
+  projectId   Int?
+  title       String
+  description String?
+  assigneeId  Int?
+  priority    String   @default("MEDIUM")
+  status      String   @default("TODO")
+  progress    Int      @default(0)
+  startDate   DateTime?
+  endDate     DateTime?
+  estimatedHours Decimal @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model ProjectExpense {
+  id          Int      @id @default(autoincrement())
+  projectId   Int?
+  date        DateTime @default(now())
+  category    String?
+  description String?
+  amount      Decimal  @default(0)
+  reference   String?
+  createdAt   DateTime @default(now())
+}
+
+model Employee {
+  id             Int      @id @default(autoincrement())
+  code           String   @unique
+  fullName       String
+  email          String?  @unique
+  phone          String?
+  department     String?
+  position       String?
+  hireDate       DateTime?
+  status         String   @default("ACTIVE")
+  baseSalary     Decimal  @default(0)
+  allowances     Decimal  @default(0)
+  bankAccountIban String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
+
+model LeaveRequest {
+  id          Int      @id @default(autoincrement())
+  employeeId  Int
+  type        String
+  startDate   DateTime
+  endDate     DateTime
+  daysCount   Int
+  status      String   @default("PENDING")
+  reason      String?
+  approvedBy  Int?
+  approvedAt  DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model PayrollRun {
+  id          Int      @id @default(autoincrement())
+  code        String   @unique
+  year        Int
+  month       Int
+  status      String   @default("DRAFT")
+  grossTotal  Decimal  @default(0)
+  deductionTotal Decimal @default(0)
+  netTotal    Decimal  @default(0)
+  runDate     DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model PayrollLine {
+  id            Int      @id @default(autoincrement())
+  payrollRunId  Int
+  employeeId    Int
+  basicSalary   Decimal  @default(0)
+  allowances    Decimal  @default(0)
+  overtime      Decimal  @default(0)
+  deductions    Decimal  @default(0)
+  netSalary     Decimal  @default(0)
+}
+
+model Contract {
+  id          Int      @id @default(autoincrement())
+  number      String   @unique
+  title       String
+  partyType   String
+  partyId     Int?
+  type        String?
+  startDate   DateTime
+  endDate     DateTime?
+  value       Decimal  @default(0)
+  status      String   @default("DRAFT")
+  terms       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model ContractMilestone {
+  id          Int      @id @default(autoincrement())
+  contractId  Int
+  title       String
+  dueDate     DateTime?
+  amount      Decimal  @default(0)
+  status      String   @default("PENDING")
+  notes       String?
+}
+
+model Notification {
+  id          Int      @id @default(autoincrement())
+  userId      Int?
+  title       String
+  message     String
+  type        String   @default("INFO")
+  isRead      Boolean  @default(false)
+  readAt      DateTime?
+  createdAt   DateTime @default(now())
+}
+
+model UserTask {
+  id          Int      @id @default(autoincrement())
+  userId      Int?
+  title       String
+  description String?
+  dueDate     DateTime?
+  priority    String   @default("MEDIUM")
+  status      String   @default("OPEN")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model BackupJob {
+  id             Int      @id @default(autoincrement())
+  action         String   @default("BACKUP")
+  status         String   @default("QUEUED")
+  fileName       String?
+  fileSize       Decimal?
+  storagePath    String?
+  isScheduled    Boolean  @default(false)
+  scheduleExpr   String?
+  sourceBackupId Int?
+  requestedBy    Int?
+  requestedAt    DateTime @default(now())
+  completedAt    DateTime?
+  notes          String?
+}
+
+model IntegrationSetting {
+  id          Int      @id @default(autoincrement())
+  key         String   @unique
+  provider    String?
+  isEnabled   Boolean  @default(false)
+  settings    Json?
+  lastSyncAt  DateTime?
+  status      String?
+  updatedAt   DateTime @updatedAt
+}
+
+model Currency {
+  id         Int      @id @default(autoincrement())
+  code       String   @unique
+  nameAr     String
+  symbol     String?
+  isBase     Boolean  @default(false)
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+model ExchangeRate {
+  id           Int      @id @default(autoincrement())
+  currencyCode String
+  rateDate     DateTime
+  rate         Decimal
+  source       String?
+  createdAt    DateTime @default(now())
+
+  @@unique([currencyCode, rateDate])
+}
+
+model ScheduledReport {
+  id          Int      @id @default(autoincrement())
+  name        String
+  reportType  String
+  schedule    String
+  format      String   @default("PDF")
+  recipients  Json?
+  isActive    Boolean  @default(true)
+  lastRunAt   DateTime?
+  nextRunAt   DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model SavedReport {
+  id          Int      @id @default(autoincrement())
+  name        String
+  reportType  String
+  definition  Json?
+  createdBy   Int?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model UserMfaSetting {
+  id              Int      @id @default(autoincrement())
+  userId          Int      @unique
+  isEnabled       Boolean  @default(false)
+  method          String?
+  secret          String?
+  backupCodes     Json?
+  verifiedAt      DateTime?
+  updatedAt       DateTime @updatedAt
+}
+
+model SecurityPolicy {
+  id                     Int      @id @default(1)
+  passwordMinLength      Int      @default(8)
+  passwordRequireComplex Boolean  @default(true)
+  passwordExpiryDays     Int      @default(90)
+  lockoutAttempts        Int      @default(5)
+  lockoutMinutes         Int      @default(30)
+  sessionTimeoutMinutes  Int      @default(30)
+  singleSessionOnly      Boolean  @default(false)
+  auditReadActions       Boolean  @default(false)
+  auditRetentionDays     Int      @default(180)
+  updatedAt              DateTime @updatedAt
+}

@@ -1,0 +1,320 @@
+import { request, withToast } from '../core/api.js';
+import { setTitle, table, formatMoney, formatDate, setPageActions, confirmAction } from '../core/ui.js';
+
+function asArray(value) {
+  return Array.isArray(value) ? value : [];
+}
+
+function currentYear() {
+  return new Date().getFullYear();
+}
+
+export async function renderBudgets(mode = 'budgets') {
+  if (mode === 'lines') return renderBudgetLines();
+  if (mode === 'variance') return renderVariance();
+  if (mode === 'reports') return renderBudgetReports();
+  return renderBudgetCrud();
+}
+
+async function renderBudgetCrud() {
+  setTitle('الموازنات التقديرية');
+  const view = document.getElementById('view');
+  view.innerHTML = '<div class="card">جاري تحميل الموازنات...</div>';
+
+  const load = async () => {
+    const budgets = asArray((await request('/budgets')).data);
+
+    view.innerHTML = `
+      <div class="card">
+        <h3>إضافة موازنة تقديرية</h3>
+        <form id="budget-form" class="grid-3">
+          <div><label>رمز الموازنة</label><input id="b-code" required /></div>
+          <div><label>اسم الموازنة</label><input id="b-name" required /></div>
+          <div><label>السنة المالية</label><input id="b-year" type="number" value="${currentYear()}" /></div>
+          <div><label>الإصدار</label><input id="b-version" value="Original" /></div>
+          <div><label>الحالة</label><select id="b-status"><option>DRAFT</option><option>ACTIVE</option><option>CLOSED</option></select></div>
+          <div><label>مستوى التحكم</label><select id="b-control"><option>NONE</option><option>WARNING</option><option>HARD</option></select></div>
+          <div><label>إجمالي الموازنة</label><input id="b-total" type="number" min="0" step="0.01" value="0" /></div>
+          <div class="actions"><button class="btn btn-primary" type="submit">حفظ الموازنة</button></div>
+        </form>
+      </div>
+
+      <div class="card">
+        <h3>قائمة الموازنات</h3>
+        ${table(
+          ['الرمز', 'الاسم', 'السنة', 'الحالة', 'مستوى التحكم', 'الإجمالي', 'الإجراءات'],
+          budgets.map((b) => [
+            b.code,
+            b.nameAr,
+            b.fiscalYear,
+            b.status,
+            b.controlLevel,
+            formatMoney(b.totalAmount),
+            `<div class="actions">
+              ${b.status !== 'ACTIVE' ? `<button class="btn btn-success btn-sm" data-action="approve" data-id="${b.id}">اعتماد</button>` : ''}
+              <button class="btn btn-danger btn-sm" data-action="delete" data-id="${b.id}">حذف</button>
+            </div>`
+          ])
+        )}
+      </div>
+    `;
+
+    document.getElementById('budget-form')?.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const payload = {
+        code: document.getElementById('b-code').value.trim(),
+        nameAr: document.getElementById('b-name').value.trim(),
+        fiscalYear: Number(document.getElementById('b-year').value || currentYear()),
+        version: document.getElementById('b-version').value.trim() || 'Original',
+        status: document.getElementById('b-status').value,
+        controlLevel: document.getElementById('b-control').value,
+        totalAmount: Number(document.getElementById('b-total').value || 0)
+      };
+
+      await withToast(() => request('/budgets', { method: 'POST', body: JSON.stringify(payload) }), 'تم حفظ الموازنة');
+      await load();
+    });
+
+    view.querySelectorAll('[data-action="approve"]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const id = Number(btn.getAttribute('data-id'));
+        await withToast(() => request(`/budgets/${id}/approve`, { method: 'POST' }), 'تم اعتماد الموازنة');
+        await load();
+      });
+    });
+
+    view.querySelectorAll('[data-action="delete"]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const id = Number(btn.getAttribute('data-id'));
+        const confirmed = await confirmAction('هل تريد حذف الموازنة؟');
+        if (!confirmed) return;
+        await withToast(() => request(`/budgets/${id}`, { method: 'DELETE' }), 'تم حذف الموازنة');
+        await load();
+      });
+    });
+
+    setPageActions({
+      onSave: () => document.getElementById('budget-form')?.requestSubmit(),
+      onRefresh: () => load()
+    });
+  };
+
+  await load();
+}
+
+async function renderBudgetLines() {
+  setTitle('بنود الموازنات');
+  const view = document.getElementById('view');
+  view.innerHTML = '<div class="card">جاري تحميل بنود الموازنات...</div>';
+
+  const state = { budgetId: '' };
+
+  const load = async () => {
+    const [budgetsRes, accountsRes, linesRes] = await Promise.all([
+      request('/budgets'),
+      request('/accounts?page=1&limit=500'),
+      request(state.budgetId ? `/budget-lines?budgetId=${state.budgetId}` : '/budget-lines')
+    ]);
+    const budgets = asArray(budgetsRes.data);
+    const accounts = asArray(accountsRes.data).filter((a) => a.allowPosting);
+    const lines = asArray(linesRes.data);
+
+    view.innerHTML = `
+      <div class="card">
+        <h3>إضافة بند موازنة</h3>
+        <form id="line-form" class="grid-3">
+          <div><label>الموازنة</label>
+            <select id="l-budget" required>
+              <option value="">اختر الموازنة</option>
+              ${budgets.map((b) => `<option value="${b.id}" ${String(b.id) === String(state.budgetId) ? 'selected' : ''}>${b.code} - ${b.nameAr}</option>`).join('')}
+            </select>
+          </div>
+          <div><label>الحساب</label>
+            <select id="l-account" required>
+              <option value="">اختر الحساب</option>
+              ${accounts.map((a) => `<option value="${a.id}">${a.code} - ${a.nameAr}</option>`).join('')}
+            </select>
+          </div>
+          <div><label>الفترة</label><input id="l-period" type="number" min="1" max="12" value="1" /></div>
+          <div><label>المبلغ المخطط</label><input id="l-amount" type="number" step="0.01" value="0" /></div>
+          <div><label>المبلغ الفعلي</label><input id="l-actual" type="number" step="0.01" value="0" /></div>
+          <div><label>المبلغ الملتزم</label><input id="l-committed" type="number" step="0.01" value="0" /></div>
+          <div class="actions"><button class="btn btn-primary" type="submit">حفظ البند</button></div>
+        </form>
+      </div>
+
+      <div class="card">
+        <h3>سجل بنود الموازنات</h3>
+        ${table(
+          ['الموازنة', 'الحساب', 'الفترة', 'المخطط', 'الفعلي', 'الملتزم', 'الانحراف', 'الإجراءات'],
+          lines.map((line) => {
+            const variance = Number(line.variance ?? Number(line.amount || 0) - Number(line.actual || 0) - Number(line.committed || 0));
+            return [
+              line.budgetId,
+              line.accountId,
+              line.period,
+              formatMoney(line.amount),
+              formatMoney(line.actual),
+              formatMoney(line.committed),
+              formatMoney(variance),
+              `<button class="btn btn-danger btn-sm" data-action="delete-line" data-id="${line.id}">حذف</button>`
+            ];
+          })
+        )}
+      </div>
+    `;
+
+    document.getElementById('l-budget')?.addEventListener('change', async (event) => {
+      state.budgetId = event.target.value || '';
+      await load();
+    });
+
+    document.getElementById('line-form')?.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const payload = {
+        budgetId: Number(document.getElementById('l-budget').value),
+        accountId: Number(document.getElementById('l-account').value),
+        period: Number(document.getElementById('l-period').value || 1),
+        amount: Number(document.getElementById('l-amount').value || 0),
+        actual: Number(document.getElementById('l-actual').value || 0),
+        committed: Number(document.getElementById('l-committed').value || 0)
+      };
+      payload.variance = payload.amount - payload.actual - payload.committed;
+
+      await withToast(() => request('/budget-lines', { method: 'POST', body: JSON.stringify(payload) }), 'تم حفظ بند الموازنة');
+      state.budgetId = String(payload.budgetId);
+      await load();
+    });
+
+    view.querySelectorAll('[data-action="delete-line"]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const id = Number(btn.getAttribute('data-id'));
+        const confirmed = await confirmAction('هل تريد حذف بند الموازنة؟');
+        if (!confirmed) return;
+        await withToast(() => request(`/budget-lines/${id}`, { method: 'DELETE' }), 'تم حذف بند الموازنة');
+        await load();
+      });
+    });
+
+    setPageActions({
+      onSave: () => document.getElementById('line-form')?.requestSubmit(),
+      onRefresh: () => load()
+    });
+  };
+
+  await load();
+}
+
+async function renderVariance() {
+  setTitle('تحليل الانحرافات');
+  const view = document.getElementById('view');
+  view.innerHTML = '<div class="card">جاري تحميل تحليل الانحرافات...</div>';
+
+  const state = { budgetId: '' };
+
+  const load = async () => {
+    const budgets = asArray((await request('/budgets')).data);
+    if (!state.budgetId && budgets.length) state.budgetId = String(budgets[0].id);
+
+    const variance = state.budgetId ? (await request(`/reports/budget-variance/${state.budgetId}`)).data || {} : {};
+    const summary = variance.summary || { budget: 0, actual: 0, variance: 0 };
+    const lines = asArray(variance.lines);
+
+    view.innerHTML = `
+      <div class="card">
+        <div class="toolbar">
+          <h3>اختيار الموازنة</h3>
+          <button id="variance-show" class="btn btn-primary btn-sm">عرض</button>
+        </div>
+        <div class="grid-2">
+          <div><label>الموازنة</label>
+            <select id="variance-budget">
+              ${budgets.map((b) => `<option value="${b.id}" ${String(b.id) === String(state.budgetId) ? 'selected' : ''}>${b.code} - ${b.nameAr}</option>`).join('')}
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <div class="kpi-grid">
+        <div class="kpi"><div>إجمالي المخطط</div><div class="val">${formatMoney(summary.budget)}</div></div>
+        <div class="kpi"><div>إجمالي الفعلي</div><div class="val">${formatMoney(summary.actual)}</div></div>
+        <div class="kpi"><div>إجمالي الانحراف</div><div class="val">${formatMoney(summary.variance)}</div></div>
+      </div>
+
+      <div class="card">
+        <h3>تفاصيل الانحرافات</h3>
+        ${table(
+          ['الحساب', 'الفترة', 'المخطط', 'الفعلي', 'الملتزم', 'الانحراف'],
+          lines.map((row) => [
+            `${row.account?.code || ''} ${row.account?.nameAr || ''}`.trim() || row.accountId,
+            row.period,
+            formatMoney(row.amount),
+            formatMoney(row.actual),
+            formatMoney(row.committed),
+            formatMoney(row.variance)
+          ])
+        )}
+      </div>
+    `;
+
+    document.getElementById('variance-show')?.addEventListener('click', async () => {
+      state.budgetId = document.getElementById('variance-budget').value;
+      await load();
+    });
+
+    setPageActions({ onRefresh: () => load() });
+  };
+
+  await load();
+}
+
+async function renderBudgetReports() {
+  setTitle('تقارير الموازنات');
+  const view = document.getElementById('view');
+  view.innerHTML = '<div class="card">جاري تحميل تقارير الموازنات...</div>';
+
+  const load = async () => {
+    const rows = asArray((await request('/reports/budget-summary')).data);
+    const summary = rows.reduce(
+      (acc, row) => {
+        acc.count += 1;
+        acc.total += Number(row.totalAmount || 0);
+        if (row.status === 'ACTIVE') acc.active += 1;
+        if (row.status === 'DRAFT') acc.draft += 1;
+        return acc;
+      },
+      { count: 0, total: 0, active: 0, draft: 0 }
+    );
+
+    view.innerHTML = `
+      <div class="kpi-grid">
+        <div class="kpi"><div>عدد الموازنات</div><div class="val">${summary.count}</div></div>
+        <div class="kpi"><div>الموازنات النشطة</div><div class="val">${summary.active}</div></div>
+        <div class="kpi"><div>الموازنات المسودة</div><div class="val">${summary.draft}</div></div>
+        <div class="kpi"><div>إجمالي القيم</div><div class="val">${formatMoney(summary.total)}</div></div>
+      </div>
+
+      <div class="card">
+        <h3>ملخص الموازنات</h3>
+        ${table(
+          ['الرمز', 'الاسم', 'السنة', 'الحالة', 'الإصدار', 'مستوى التحكم', 'الإجمالي', 'تاريخ الإنشاء'],
+          rows.map((r) => [
+            r.code,
+            r.nameAr,
+            r.fiscalYear,
+            r.status,
+            r.version || '-',
+            r.controlLevel || '-',
+            formatMoney(r.totalAmount),
+            formatDate(r.createdAt)
+          ])
+        )}
+      </div>
+    `;
+
+    setPageActions({ onRefresh: () => load() });
+  };
+
+  await load();
+}
+

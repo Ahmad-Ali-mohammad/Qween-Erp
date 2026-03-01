@@ -1,0 +1,1768 @@
+{
+  "generatedAt": "2026-02-28T23:30:30.599Z",
+  "results": [
+    {
+      "tab": "/quick-journal",
+      "mode": "MAPPED",
+      "get": "OK",
+      "set": "OK",
+      "details": [
+        {
+          "method": "get",
+          "apiPath": "/api/accounts",
+          "status": 200,
+          "exists": true
+        },
+        {
+          "method": "get",
+          "apiPath": "/api/periods",
+          "status": 200,
+          "exists": true
+        },
+        {
+          "method": "get",
+          "apiPath": "/api/journals",
+          "status": 200,
+          "exists": true
+        },
+        {
+          "method": "post",
+          "apiPath": "/api/journals",
+          "status": 422,
+          "exists": true
+        }
+      ]
+    },
+    {
+      "tab": "/quick-invoice",
+      "mode": "MAPPED",
+      "get": "OK",
+      "set": "OK",
+      "details": [
+        {
+          "method": "get",
+          "apiPath": "/api/invoices",
+          "status": 200,
+          "exists": true
+        },
+        {
+          "method": "get",
+          "apiPath": "/api/customers",
+          "status": 200,
+          "exists": true
+        },
+        {
+          "method": "get",
+          "apiPath": "/api/suppliers",
+          "status": 200,
+          "exists": true
+        },
+        {
+          "method": "post",
+          "apiPath": "/api/invoices",
+          "status": 422,
+          "exists": true
+        }
+      ]
+    },
+    {
+      "tab": "/quick-statement",
+      "mode": "MAPPED",
+      "get": "OK",
+      "set": "READ_ONLY",
+      "details": [
+        {
+          "method": "get",
+          "apiPath": "/api/reports/account-statement?accountId=1&dateFrom=2025-01-01&dateTo=2025-12-31",
+          "status": 200,
+          "exists": true
+        }
+      ]
+    },
+    {
+      "tab": "/global-search",
+      "mode": "MAPPED",
+      "get": "OK",
+      "set": "READ_ONLY",
+      "details": [
+        {
+          "method": "get",
+          "apiPath": "/api/journals",
+          "status": 200,
+          "exists": true
+        },
+        {
+          "method": "get",
+          "apiPath": "/api/invoices",
+          "status": 200,
+          "exists": true
+        },
+        {
+          "method": "get",
+          "apiPath": "/api/payments",
+          "status": 200,
+          "exists": true
+        },
+        {
+          "method": "get",
+          "apiPath": "/api/customers",
+          "status": 200,
+          "exists": true
+        },
+        {
+          "method": "get",
+          "apiPath": "/api/suppliers",
+          "status": 200,
+          "exists": true
+        },
+        {
+          "method": "get",
+          "apiPath": "/api/accounts",
+          "status": 200,
+          "exists": true
+        }
+      ]
+    },
+    {
+      "tab": "/dashboard",
+      "mode": "MAPPED",
+      "get": "OK",
+      "set": "READ_ONLY",
+      "details": [
+        {
+          "method": "get",
+          "apiPath": "/api/reports/kpis",
+          "status": 200,
+          "exists": true
+        }
+      ]
+    },
+    {
+      "tab": "/accounts",
+      "mode": "MAPPED",
+      "get": "OK",
+      "set": "OK",
+      "details": [
+        {
+          "method": "get",
+          "apiPath": "/api/accounts",
+          "status": 200,
+          "exists": true
+        },
+        {
+          "method": "post",
+          "apiPath": "/api/accounts",
+          "status": 422,
+          "exists": true
+        }
+      ]
+    },
+    {
+      "tab": "/journals",
+      "mode": "MAPPED",
+      "get": "OK",
+      "set": "OK",
+      "details": [
+        {
+          "method": "get",
+          "apiPath": "/api/journals",
+          "status": 200,
+          "exists": true
+        },
+        {
+          "method": "post",
+          "apiPath": "/api/journals",
+          "status": 422,
+          "exists": true
+        }
+      ]
+    },
+    {
+      "tab": "/reports/trial-balance",
+      "mode": "MAPPED",
+      "get": "OK",
+      "set": "READ_ONLY",
+      "details": [
+        {
+          "method": "get",
+          "apiPath": "/api/reports/trial-balance",
+          "status": 200,
+          "exists": true
+        }
+      ]
+    },
+    {
+      "tab": "/reports/income-statement",
+      "mode": "MAPPED",
+      "get": "OK",
+      "set": "READ_ONLY",
+      "details": [
+        {
+          "method": "get",
+          "apiPath": "/api/reports/income-statement",
+          "status": 500,
+          "exists": true
+        }
+      ]
+    },
+    {
+      "tab": "/reports/balance-sheet",
+      "mode": "MAPPED",
+      "get": "OK",
+      "set": "READ_ONLY",
+      "details": [
+        {
+          "method": "get",
+          "apiPath": "/api/reports/balance-sheet",
+          "status": 500,
+          "exists": true
+        }
+      ]
+    },
+    {
+      "tab": "/general-ledger",
+      "mode": "MAPPED",
+      "get": "OK",
+      "set": "OK",
+      "details": [
+        {
+          "method": "get",
+          "apiPath": "/api/journals",
+          "status": 200,
+          "exists": true
+        },
+        {
+          "method": "get",
+          "apiPath": "/api/accounts",
+          "status": 200,
+          "exists": true
+        },
+        {
+          "method": "post",
+          "apiPath": "/api/journals",
+          "status": 422,
+          "exists": true
+        }
+      ]
+    },
+    {
+      "tab": "/account-statement",
+      "mode": "MAPPED",
+      "get": "OK",
+      "set": "READ_ONLY",
+      "details": [
+        {
+          "method": "get",
+          "apiPath": "/api/reports/account-statement?accountId=1&dateFrom=2025-01-01&dateTo=2025-12-31",
+          "status": 200,
+          "exists": true
+        }
+      ]
+    },
+    {
+      "tab": "/fiscal-years",
+      "mode": "MAPPED",
+      "get": "OK",
+      "set": "OK",
+      "details": [
+        {
+          "method": "get",
+          "apiPath": "/api/fiscal-years",
+          "status": 200,
+          "exists": true
+        },
+        {
+          "method": "post",
+          "apiPath": "/api/fiscal-years",
+          "status": 500,
+          "exists": true
+        }
+      ]
+    },
+    {
+      "tab": "/periods",
+      "mode": "MAPPED",
+      "get": "OK",
+      "set": "OK",
+      "details": [
+        {
+          "method": "get",
+          "apiPath": "/api/periods",
+          "status": 200,
+          "exists": true
+        },
+        {
+          "method": "post",
+          "apiPath": "/api/periods",
+          "status": 500,
+          "exists": true
+        }
+      ]
+    },
+    {
+      "tab": "/year-close",
+      "mode": "MAPPED",
+      "get": "OK",
+      "set": "OK",
+      "details": [
+        {
+          "method": "get",
+          "apiPath": "/api/year-close/check",
+          "status": 200,
+          "exists": true
+        },
+        {
+          "method": "post",
+          "apiPath": "/api/year-close/transfer-balances",
+          "status": 422,
+          "exists": true
+        },
+        {
+          "method": "post",
+          "apiPath": "/api/year-close/opening-entry",
+          "status": 202,
+          "exists": true
+        }
+      ]
+    },
+    {
+      "tab": "/customers",
+      "mode": "MAPPED",
+      "get": "OK",
+      "set": "OK",
+      "details": [
+        {
+          "method": "get",
+          "apiPath": "/api/customers",
+          "status": 200,
+          "exists": true
+        },
+        {
+          "method": "post",
+          "apiPath": "/api/customers",
+          "status": 422,
+          "exists": true
+        }
+      ]
+    },
+    {
+      "tab": "/sales-invoices",
+      "mode": "MAPPED",
+      "get": "OK",
+      "set": "OK",
+      "details": [
+        {
+          "method": "get",
+          "apiPath": "/api/invoices",
+          "status": 200,
+          "exists": true
+        },
+        {
+          "method": "post",
+          "apiPath": "/api/invoices",
+          "status": 422,
+          "exists": true
+        }
+      ]
+    },
+    {
+      "tab": "/receipts",
+      "mode": "MAPPED",
+      "get": "OK",
+      "set": "OK",
+      "details": [
+        {
+          "method": "get",
+          "apiPath": "/api/payments",
+          "status": 200,
+          "exists": true
+        },
+        {
+          "method": "post",
+          "apiPath": "/api/payments",
+          "status": 422,
+          "exists": true
+        }
+      ]
+    },
+    {
+      "tab": "/sales-quotes",
+      "mode": "MAPPED",
+      "get": "OK",
+      "set": "OK",
+      "details": [
+        {
+          "method": "get",
+          "apiPath": "/api/quotes",
+          "status": 200,
+          "exists": true
+        },
+        {
+          "method": "post",
+          "apiPath": "/api/quotes",
+          "status": 422,
+          "exists": true
+        }
+      ]
+    },
+    {
+      "tab": "/sales-returns",
+      "mode": "MAPPED",
+      "get": "OK",
+      "set": "OK",
+      "details": [
+        {
+          "method": "get",
+          "apiPath": "/api/sales-returns",
+          "status": 200,
+          "exists": true
+        },
+        {
+          "method": "post",
+          "apiPath": "/api/sales-returns",
+          "status": 422,
+          "exists": true
+        }
+      ]
+    },
+    {
+      "tab": "/sales-reports",
+      "mode": "MAPPED",
+      "get": "OK",
+      "set": "READ_ONLY",
+      "details": [
+        {
+          "method": "get",
+          "apiPath": "/api/reports/sales",
+          "status": 200,
+          "exists": true
+        }
+      ]
+    },
+    {
+      "tab": "/suppliers",
+      "mode": "MAPPED",
+      "get": "OK",
+      "set": "OK",
+      "details": [
+        {
+          "method": "get",
+          "apiPath": "/api/suppliers",
+          "status": 200,
+          "exists": true
+        },
+        {
+          "method": "post",
+          "apiPath": "/api/suppliers",
+          "status": 422,
+          "exists": true
+        }
+      ]
+    },
+    {
+      "tab": "/purchase-invoices",
+      "mode": "MAPPED",
+      "get": "OK",
+      "set": "OK",
+      "details": [
+        {
+          "method": "get",
+          "apiPath": "/api/invoices",
+          "status": 200,
+          "exists": true
+        },
+        {
+          "method": "post",
+          "apiPath": "/api/invoices",
+          "status": 422,
+          "exists": true
+        }
+      ]
+    },
+    {
+      "tab": "/payment-vouchers",
+      "mode": "MAPPED",
+      "get": "OK",
+      "set": "OK",
+      "details": [
+        {
+          "method": "get",
+          "apiPath": "/api/payments",
+          "status": 200,
+          "exists": true
+        },
+        {
+          "method": "post",
+          "apiPath": "/api/payments",
+          "status": 422,
+          "exists": true
+        }
+      ]
+    },
+    {
+      "tab": "/purchase-orders",
+      "mode": "MAPPED",
+      "get": "OK",
+      "set": "OK",
+      "details": [
+        {
+          "method": "get",
+          "apiPath": "/api/purchase-orders",
+          "status": 200,
+          "exists": true
+        },
+        {
+          "method": "post",
+          "apiPath": "/api/purchase-orders",
+          "status": 422,
+          "exists": true
+        }
+      ]
+    },
+    {
+      "tab": "/purchase-returns",
+      "mode": "MAPPED",
+      "get": "OK",
+      "set": "OK",
+      "details": [
+        {
+          "method": "get",
+          "apiPath": "/api/purchase-returns",
+          "status": 200,
+          "exists": true
+        },
+        {
+          "method": "post",
+          "apiPath": "/api/purchase-returns",
+          "status": 422,
+          "exists": true
+        }
+      ]
+    },
+    {
+      "tab": "/purchase-reports",
+      "mode": "MAPPED",
+      "get": "OK",
+      "set": "READ_ONLY",
+      "details": [
+        {
+          "method": "get",
+          "apiPath": "/api/reports/purchases",
+          "status": 200,
+          "exists": true
+        }
+      ]
+    },
+    {
+      "tab": "/items",
+      "mode": "MAPPED",
+      "get": "OK",
+      "set": "OK",
+      "details": [
+        {
+          "method": "get",
+          "apiPath": "/api/items",
+          "status": 200,
+          "exists": true
+        },
+        {
+          "method": "post",
+          "apiPath": "/api/items",
+          "status": 422,
+          "exists": true
+        }
+      ]
+    },
+    {
+      "tab": "/item-categories",
+      "mode": "MAPPED",
+      "get": "OK",
+      "set": "OK",
+      "details": [
+        {
+          "method": "get",
+          "apiPath": "/api/item-categories",
+          "status": 200,
+          "exists": true
+        },
+        {
+          "method": "post",
+          "apiPath": "/api/item-categories",
+          "status": 422,
+          "exists": true
+        }
+      ]
+    },
+    {
+      "tab": "/units",
+      "mode": "MAPPED",
+      "get": "OK",
+      "set": "OK",
+      "details": [
+        {
+          "method": "get",
+          "apiPath": "/api/units",
+          "status": 200,
+          "exists": true
+        },
+        {
+          "method": "post",
+          "apiPath": "/api/units",
+          "status": 422,
+          "exists": true
+        }
+      ]
+    },
+    {
+      "tab": "/warehouses",
+      "mode": "MAPPED",
+      "get": "OK",
+      "set": "OK",
+      "details": [
+        {
+          "method": "get",
+          "apiPath": "/api/warehouses",
+          "status": 200,
+          "exists": true
+        },
+        {
+          "method": "post",
+          "apiPath": "/api/warehouses",
+          "status": 422,
+          "exists": true
+        }
+      ]
+    },
+    {
+      "tab": "/stock-counts",
+      "mode": "MAPPED",
+      "get": "OK",
+      "set": "OK",
+      "details": [
+        {
+          "method": "get",
+          "apiPath": "/api/stock-counts",
+          "status": 200,
+          "exists": true
+        },
+        {
+          "method": "post",
+          "apiPath": "/api/stock-counts",
+          "status": 422,
+          "exists": true
+        }
+      ]
+    },
+    {
+      "tab": "/stock-movements",
+      "mode": "MAPPED",
+      "get": "OK",
+      "set": "OK",
+      "details": [
+        {
+          "method": "get",
+          "apiPath": "/api/stock-movements",
+          "status": 200,
+          "exists": true
+        },
+        {
+          "method": "post",
+          "apiPath": "/api/stock-movements",
+          "status": 422,
+          "exists": true
+        }
+      ]
+    },
+    {
+      "tab": "/inventory-reports",
+      "mode": "MAPPED",
+      "get": "OK",
+      "set": "READ_ONLY",
+      "details": [
+        {
+          "method": "get",
+          "apiPath": "/api/reports/inventory",
+          "status": 200,
+          "exists": true
+        }
+      ]
+    },
+    {
+      "tab": "/asset-categories",
+      "mode": "MAPPED",
+      "get": "OK",
+      "set": "OK",
+      "details": [
+        {
+          "method": "get",
+          "apiPath": "/api/asset-categories",
+          "status": 200,
+          "exists": true
+        },
+        {
+          "method": "post",
+          "apiPath": "/api/asset-categories",
+          "status": 500,
+          "exists": true
+        }
+      ]
+    },
+    {
+      "tab": "/assets",
+      "mode": "MAPPED",
+      "get": "OK",
+      "set": "OK",
+      "details": [
+        {
+          "method": "get",
+          "apiPath": "/api/assets",
+          "status": 200,
+          "exists": true
+        },
+        {
+          "method": "post",
+          "apiPath": "/api/assets",
+          "status": 422,
+          "exists": true
+        }
+      ]
+    },
+    {
+      "tab": "/depreciation",
+      "mode": "MAPPED",
+      "get": "OK",
+      "set": "OK",
+      "details": [
+        {
+          "method": "get",
+          "apiPath": "/api/depreciation",
+          "status": 200,
+          "exists": true
+        },
+        {
+          "method": "post",
+          "apiPath": "/api/depreciation/run",
+          "status": 500,
+          "exists": true
+        }
+      ]
+    },
+    {
+      "tab": "/asset-disposal",
+      "mode": "MAPPED",
+      "get": "OK",
+      "set": "OK",
+      "details": [
+        {
+          "method": "get",
+          "apiPath": "/api/assets",
+          "status": 200,
+          "exists": true
+        },
+        {
+          "method": "post",
+          "apiPath": "/api/assets",
+          "status": 422,
+          "exists": true
+        }
+      ]
+    },
+    {
+      "tab": "/asset-reports",
+      "mode": "MAPPED",
+      "get": "OK",
+      "set": "READ_ONLY",
+      "details": [
+        {
+          "method": "get",
+          "apiPath": "/api/assets",
+          "status": 200,
+          "exists": true
+        }
+      ]
+    },
+    {
+      "tab": "/banks",
+      "mode": "MAPPED",
+      "get": "OK",
+      "set": "OK",
+      "details": [
+        {
+          "method": "get",
+          "apiPath": "/api/banks",
+          "status": 200,
+          "exists": true
+        },
+        {
+          "method": "post",
+          "apiPath": "/api/banks",
+          "status": 422,
+          "exists": true
+        }
+      ]
+    },
+    {
+      "tab": "/bank-transactions",
+      "mode": "MAPPED",
+      "get": "OK",
+      "set": "OK",
+      "details": [
+        {
+          "method": "get",
+          "apiPath": "/api/bank-transactions",
+          "status": 200,
+          "exists": true
+        },
+        {
+          "method": "post",
+          "apiPath": "/api/bank-transactions",
+          "status": 500,
+          "exists": true
+        }
+      ]
+    },
+    {
+      "tab": "/reconciliation",
+      "mode": "MAPPED",
+      "get": "OK",
+      "set": "OK",
+      "details": [
+        {
+          "method": "get",
+          "apiPath": "/api/bank-transactions",
+          "status": 200,
+          "exists": true
+        },
+        {
+          "method": "post",
+          "apiPath": "/api/bank-transactions/1/reconcile",
+          "status": 200,
+          "exists": true
+        }
+      ]
+    },
+    {
+      "tab": "/cashbox",
+      "mode": "MAPPED",
+      "get": "OK",
+      "set": "OK",
+      "details": [
+        {
+          "method": "get",
+          "apiPath": "/api/payments",
+          "status": 200,
+          "exists": true
+        },
+        {
+          "method": "post",
+          "apiPath": "/api/payments",
+          "status": 422,
+          "exists": true
+        }
+      ]
+    },
+    {
+      "tab": "/cash-transactions",
+      "mode": "MAPPED",
+      "get": "OK",
+      "set": "OK",
+      "details": [
+        {
+          "method": "get",
+          "apiPath": "/api/payments",
+          "status": 200,
+          "exists": true
+        },
+        {
+          "method": "post",
+          "apiPath": "/api/payments",
+          "status": 422,
+          "exists": true
+        }
+      ]
+    },
+    {
+      "tab": "/bank-reports",
+      "mode": "MAPPED",
+      "get": "OK",
+      "set": "READ_ONLY",
+      "details": [
+        {
+          "method": "get",
+          "apiPath": "/api/bank-transactions",
+          "status": 200,
+          "exists": true
+        }
+      ]
+    },
+    {
+      "tab": "/budgets",
+      "mode": "MAPPED",
+      "get": "OK",
+      "set": "OK",
+      "details": [
+        {
+          "method": "get",
+          "apiPath": "/api/budgets",
+          "status": 200,
+          "exists": true
+        },
+        {
+          "method": "post",
+          "apiPath": "/api/budgets",
+          "status": 422,
+          "exists": true
+        }
+      ]
+    },
+    {
+      "tab": "/budget-lines",
+      "mode": "MAPPED",
+      "get": "OK",
+      "set": "OK",
+      "details": [
+        {
+          "method": "get",
+          "apiPath": "/api/budgets/lines/all",
+          "status": 200,
+          "exists": true
+        },
+        {
+          "method": "post",
+          "apiPath": "/api/budgets/lines",
+          "status": 422,
+          "exists": true
+        }
+      ]
+    },
+    {
+      "tab": "/budget-variance",
+      "mode": "MAPPED",
+      "get": "OK",
+      "set": "OK",
+      "details": [
+        {
+          "method": "get",
+          "apiPath": "/api/budgets/lines/all",
+          "status": 200,
+          "exists": true
+        },
+        {
+          "method": "post",
+          "apiPath": "/api/budgets/lines",
+          "status": 422,
+          "exists": true
+        }
+      ]
+    },
+    {
+      "tab": "/budget-reports",
+      "mode": "MAPPED",
+      "get": "OK",
+      "set": "READ_ONLY",
+      "details": [
+        {
+          "method": "get",
+          "apiPath": "/api/budgets/lines/all",
+          "status": 200,
+          "exists": true
+        }
+      ]
+    },
+    {
+      "tab": "/tax-codes",
+      "mode": "MAPPED",
+      "get": "OK",
+      "set": "OK",
+      "details": [
+        {
+          "method": "get",
+          "apiPath": "/api/tax-codes",
+          "status": 200,
+          "exists": true
+        },
+        {
+          "method": "post",
+          "apiPath": "/api/tax-codes",
+          "status": 500,
+          "exists": true
+        }
+      ]
+    },
+    {
+      "tab": "/tax-categories",
+      "mode": "MAPPED",
+      "get": "OK",
+      "set": "OK",
+      "details": [
+        {
+          "method": "get",
+          "apiPath": "/api/tax-categories",
+          "status": 200,
+          "exists": true
+        },
+        {
+          "method": "put",
+          "apiPath": "/api/tax-categories",
+          "status": 422,
+          "exists": true
+        }
+      ]
+    },
+    {
+      "tab": "/tax-declarations",
+      "mode": "MAPPED",
+      "get": "OK",
+      "set": "OK",
+      "details": [
+        {
+          "method": "get",
+          "apiPath": "/api/tax-declarations",
+          "status": 200,
+          "exists": true
+        },
+        {
+          "method": "post",
+          "apiPath": "/api/tax-declarations",
+          "status": 500,
+          "exists": true
+        }
+      ]
+    },
+    {
+      "tab": "/zatca",
+      "mode": "MAPPED",
+      "get": "OK",
+      "set": "OK",
+      "details": [
+        {
+          "method": "get",
+          "apiPath": "/api/zatca",
+          "status": 200,
+          "exists": true
+        },
+        {
+          "method": "put",
+          "apiPath": "/api/zatca",
+          "status": 200,
+          "exists": true
+        }
+      ]
+    },
+    {
+      "tab": "/tax-reports",
+      "mode": "MAPPED",
+      "get": "OK",
+      "set": "READ_ONLY",
+      "details": [
+        {
+          "method": "get",
+          "apiPath": "/api/tax-reports",
+          "status": 200,
+          "exists": true
+        }
+      ]
+    },
+    {
+      "tab": "/currencies",
+      "mode": "MAPPED",
+      "get": "OK",
+      "set": "OK",
+      "details": [
+        {
+          "method": "get",
+          "apiPath": "/api/currencies",
+          "status": 200,
+          "exists": true
+        },
+        {
+          "method": "post",
+          "apiPath": "/api/currencies",
+          "status": 422,
+          "exists": true
+        }
+      ]
+    },
+    {
+      "tab": "/exchange-rates",
+      "mode": "MAPPED",
+      "get": "OK",
+      "set": "OK",
+      "details": [
+        {
+          "method": "get",
+          "apiPath": "/api/exchange-rates",
+          "status": 200,
+          "exists": true
+        },
+        {
+          "method": "post",
+          "apiPath": "/api/exchange-rates",
+          "status": 422,
+          "exists": true
+        }
+      ]
+    },
+    {
+      "tab": "/currency-diff",
+      "mode": "MAPPED",
+      "get": "OK",
+      "set": "OK",
+      "details": [
+        {
+          "method": "get",
+          "apiPath": "/api/currency-diff",
+          "status": 200,
+          "exists": true
+        },
+        {
+          "method": "put",
+          "apiPath": "/api/currency-diff",
+          "status": 200,
+          "exists": true
+        }
+      ]
+    },
+    {
+      "tab": "/reports/kpis",
+      "mode": "MAPPED",
+      "get": "OK",
+      "set": "READ_ONLY",
+      "details": [
+        {
+          "method": "get",
+          "apiPath": "/api/reports/kpis",
+          "status": 200,
+          "exists": true
+        }
+      ]
+    },
+    {
+      "tab": "/reports/aging",
+      "mode": "MAPPED",
+      "get": "OK",
+      "set": "READ_ONLY",
+      "details": [
+        {
+          "method": "get",
+          "apiPath": "/api/reports/aging",
+          "status": 200,
+          "exists": true
+        }
+      ]
+    },
+    {
+      "tab": "/reports/cash-flow",
+      "mode": "MAPPED",
+      "get": "OK",
+      "set": "READ_ONLY",
+      "details": [
+        {
+          "method": "get",
+          "apiPath": "/api/reports/cash-flow",
+          "status": 200,
+          "exists": true
+        }
+      ]
+    },
+    {
+      "tab": "/reports/income-comparative",
+      "mode": "MAPPED",
+      "get": "OK",
+      "set": "READ_ONLY",
+      "details": [
+        {
+          "method": "get",
+          "apiPath": "/api/reports/income-comparative",
+          "status": 500,
+          "exists": true
+        }
+      ]
+    },
+    {
+      "tab": "/reports/custom",
+      "mode": "MAPPED",
+      "get": "OK",
+      "set": "OK",
+      "details": [
+        {
+          "method": "get",
+          "apiPath": "/api/reports/custom",
+          "status": 200,
+          "exists": true
+        },
+        {
+          "method": "post",
+          "apiPath": "/api/reports/custom",
+          "status": 500,
+          "exists": true
+        }
+      ]
+    },
+    {
+      "tab": "/reports/schedules",
+      "mode": "MAPPED",
+      "get": "OK",
+      "set": "OK",
+      "details": [
+        {
+          "method": "get",
+          "apiPath": "/api/reports/schedules",
+          "status": 200,
+          "exists": true
+        },
+        {
+          "method": "post",
+          "apiPath": "/api/reports/schedules",
+          "status": 500,
+          "exists": true
+        }
+      ]
+    },
+    {
+      "tab": "/analytics/abc",
+      "mode": "MAPPED",
+      "get": "OK",
+      "set": "READ_ONLY",
+      "details": [
+        {
+          "method": "get",
+          "apiPath": "/api/analytics/abc",
+          "status": 200,
+          "exists": true
+        }
+      ]
+    },
+    {
+      "tab": "/analytics/clv",
+      "mode": "MAPPED",
+      "get": "OK",
+      "set": "READ_ONLY",
+      "details": [
+        {
+          "method": "get",
+          "apiPath": "/api/analytics/clv",
+          "status": 200,
+          "exists": true
+        }
+      ]
+    },
+    {
+      "tab": "/analytics/forecast",
+      "mode": "MAPPED",
+      "get": "OK",
+      "set": "READ_ONLY",
+      "details": [
+        {
+          "method": "get",
+          "apiPath": "/api/analytics/sales-forecast",
+          "status": 200,
+          "exists": true
+        }
+      ]
+    },
+    {
+      "tab": "/analytics/bsc",
+      "mode": "MAPPED",
+      "get": "OK",
+      "set": "READ_ONLY",
+      "details": [
+        {
+          "method": "get",
+          "apiPath": "/api/analytics/bsc",
+          "status": 200,
+          "exists": true
+        }
+      ]
+    },
+    {
+      "tab": "/users-roles",
+      "mode": "MAPPED",
+      "get": "OK",
+      "set": "OK",
+      "details": [
+        {
+          "method": "get",
+          "apiPath": "/api/users",
+          "status": 200,
+          "exists": true
+        },
+        {
+          "method": "get",
+          "apiPath": "/api/roles",
+          "status": 200,
+          "exists": true
+        },
+        {
+          "method": "post",
+          "apiPath": "/api/users",
+          "status": 422,
+          "exists": true
+        },
+        {
+          "method": "post",
+          "apiPath": "/api/roles",
+          "status": 422,
+          "exists": true
+        }
+      ]
+    },
+    {
+      "tab": "/company-settings",
+      "mode": "MAPPED",
+      "get": "OK",
+      "set": "OK",
+      "details": [
+        {
+          "method": "get",
+          "apiPath": "/api/settings/company",
+          "status": 200,
+          "exists": true
+        },
+        {
+          "method": "put",
+          "apiPath": "/api/settings/company",
+          "status": 200,
+          "exists": true
+        }
+      ]
+    },
+    {
+      "tab": "/system-settings",
+      "mode": "MAPPED",
+      "get": "OK",
+      "set": "OK",
+      "details": [
+        {
+          "method": "get",
+          "apiPath": "/api/settings/system",
+          "status": 200,
+          "exists": true
+        },
+        {
+          "method": "put",
+          "apiPath": "/api/settings/system",
+          "status": 200,
+          "exists": true
+        }
+      ]
+    },
+    {
+      "tab": "/audit-logs",
+      "mode": "MAPPED",
+      "get": "OK",
+      "set": "READ_ONLY",
+      "details": [
+        {
+          "method": "get",
+          "apiPath": "/api/audit-logs",
+          "status": 200,
+          "exists": true
+        }
+      ]
+    },
+    {
+      "tab": "/backups",
+      "mode": "MAPPED",
+      "get": "OK",
+      "set": "OK",
+      "details": [
+        {
+          "method": "get",
+          "apiPath": "/api/backups",
+          "status": 200,
+          "exists": true
+        },
+        {
+          "method": "post",
+          "apiPath": "/api/backups",
+          "status": 422,
+          "exists": true
+        }
+      ]
+    },
+    {
+      "tab": "/notifications",
+      "mode": "MAPPED",
+      "get": "OK",
+      "set": "OK",
+      "details": [
+        {
+          "method": "get",
+          "apiPath": "/api/notifications",
+          "status": 200,
+          "exists": true
+        },
+        {
+          "method": "post",
+          "apiPath": "/api/notifications",
+          "status": 422,
+          "exists": true
+        }
+      ]
+    },
+    {
+      "tab": "/tasks",
+      "mode": "MAPPED",
+      "get": "OK",
+      "set": "OK",
+      "details": [
+        {
+          "method": "get",
+          "apiPath": "/api/tasks",
+          "status": 200,
+          "exists": true
+        },
+        {
+          "method": "post",
+          "apiPath": "/api/tasks",
+          "status": 422,
+          "exists": true
+        }
+      ]
+    },
+    {
+      "tab": "/internal-controls",
+      "mode": "MAPPED",
+      "get": "OK",
+      "set": "OK",
+      "details": [
+        {
+          "method": "get",
+          "apiPath": "/api/internal-controls",
+          "status": 200,
+          "exists": true
+        },
+        {
+          "method": "put",
+          "apiPath": "/api/internal-controls",
+          "status": 200,
+          "exists": true
+        }
+      ]
+    },
+    {
+      "tab": "/security",
+      "mode": "MAPPED",
+      "get": "OK",
+      "set": "OK",
+      "details": [
+        {
+          "method": "get",
+          "apiPath": "/api/security/policies",
+          "status": 200,
+          "exists": true
+        },
+        {
+          "method": "put",
+          "apiPath": "/api/security/policies",
+          "status": 422,
+          "exists": true
+        }
+      ]
+    },
+    {
+      "tab": "/integrations",
+      "mode": "MAPPED",
+      "get": "OK",
+      "set": "OK",
+      "details": [
+        {
+          "method": "get",
+          "apiPath": "/api/integration-settings",
+          "status": 200,
+          "exists": true
+        },
+        {
+          "method": "post",
+          "apiPath": "/api/integration-settings",
+          "status": 422,
+          "exists": true
+        }
+      ]
+    },
+    {
+      "tab": "/opportunities",
+      "mode": "MAPPED",
+      "get": "OK",
+      "set": "OK",
+      "details": [
+        {
+          "method": "get",
+          "apiPath": "/api/opportunities",
+          "status": 200,
+          "exists": true
+        },
+        {
+          "method": "post",
+          "apiPath": "/api/opportunities",
+          "status": 422,
+          "exists": true
+        }
+      ]
+    },
+    {
+      "tab": "/support-tickets",
+      "mode": "MAPPED",
+      "get": "OK",
+      "set": "OK",
+      "details": [
+        {
+          "method": "get",
+          "apiPath": "/api/support-tickets",
+          "status": 200,
+          "exists": true
+        },
+        {
+          "method": "post",
+          "apiPath": "/api/support-tickets",
+          "status": 422,
+          "exists": true
+        }
+      ]
+    },
+    {
+      "tab": "/contacts",
+      "mode": "MAPPED",
+      "get": "OK",
+      "set": "OK",
+      "details": [
+        {
+          "method": "get",
+          "apiPath": "/api/contacts",
+          "status": 200,
+          "exists": true
+        },
+        {
+          "method": "post",
+          "apiPath": "/api/contacts",
+          "status": 429,
+          "exists": true
+        }
+      ]
+    },
+    {
+      "tab": "/projects",
+      "mode": "MAPPED",
+      "get": "OK",
+      "set": "OK",
+      "details": [
+        {
+          "method": "get",
+          "apiPath": "/api/projects",
+          "status": 429,
+          "exists": true
+        },
+        {
+          "method": "post",
+          "apiPath": "/api/projects",
+          "status": 429,
+          "exists": true
+        }
+      ]
+    },
+    {
+      "tab": "/project-tasks",
+      "mode": "MAPPED",
+      "get": "OK",
+      "set": "OK",
+      "details": [
+        {
+          "method": "get",
+          "apiPath": "/api/project-tasks",
+          "status": 429,
+          "exists": true
+        },
+        {
+          "method": "post",
+          "apiPath": "/api/project-tasks",
+          "status": 429,
+          "exists": true
+        }
+      ]
+    },
+    {
+      "tab": "/project-expenses",
+      "mode": "MAPPED",
+      "get": "OK",
+      "set": "OK",
+      "details": [
+        {
+          "method": "get",
+          "apiPath": "/api/project-expenses",
+          "status": 429,
+          "exists": true
+        },
+        {
+          "method": "post",
+          "apiPath": "/api/project-expenses",
+          "status": 429,
+          "exists": true
+        }
+      ]
+    },
+    {
+      "tab": "/employees",
+      "mode": "MAPPED",
+      "get": "OK",
+      "set": "OK",
+      "details": [
+        {
+          "method": "get",
+          "apiPath": "/api/employees",
+          "status": 429,
+          "exists": true
+        },
+        {
+          "method": "post",
+          "apiPath": "/api/employees",
+          "status": 429,
+          "exists": true
+        }
+      ]
+    },
+    {
+      "tab": "/leave-requests",
+      "mode": "MAPPED",
+      "get": "OK",
+      "set": "OK",
+      "details": [
+        {
+          "method": "get",
+          "apiPath": "/api/leaves",
+          "status": 429,
+          "exists": true
+        },
+        {
+          "method": "post",
+          "apiPath": "/api/leaves",
+          "status": 429,
+          "exists": true
+        }
+      ]
+    },
+    {
+      "tab": "/payroll-runs",
+      "mode": "MAPPED",
+      "get": "OK",
+      "set": "OK",
+      "details": [
+        {
+          "method": "get",
+          "apiPath": "/api/payroll-runs",
+          "status": 429,
+          "exists": true
+        },
+        {
+          "method": "post",
+          "apiPath": "/api/payroll-runs",
+          "status": 429,
+          "exists": true
+        }
+      ]
+    },
+    {
+      "tab": "/contracts",
+      "mode": "MAPPED",
+      "get": "OK",
+      "set": "OK",
+      "details": [
+        {
+          "method": "get",
+          "apiPath": "/api/contracts",
+          "status": 429,
+          "exists": true
+        },
+        {
+          "method": "post",
+          "apiPath": "/api/contracts",
+          "status": 429,
+          "exists": true
+        }
+      ]
+    },
+    {
+      "tab": "/contract-milestones",
+      "mode": "MAPPED",
+      "get": "OK",
+      "set": "OK",
+      "details": [
+        {
+          "method": "get",
+          "apiPath": "/api/contract-milestones",
+          "status": 429,
+          "exists": true
+        },
+        {
+          "method": "post",
+          "apiPath": "/api/contract-milestones",
+          "status": 429,
+          "exists": true
+        }
+      ]
+    },
+    {
+      "tab": "/help",
+      "mode": "UI_ONLY",
+      "get": "N/A",
+      "set": "N/A",
+      "details": []
+    },
+    {
+      "tab": "/knowledge-base",
+      "mode": "UI_ONLY",
+      "get": "N/A",
+      "set": "N/A",
+      "details": []
+    },
+    {
+      "tab": "/assistant",
+      "mode": "UI_ONLY",
+      "get": "N/A",
+      "set": "N/A",
+      "details": []
+    },
+    {
+      "tab": "/support",
+      "mode": "UI_ONLY",
+      "get": "N/A",
+      "set": "N/A",
+      "details": []
+    },
+    {
+      "tab": "/onboarding",
+      "mode": "UI_ONLY",
+      "get": "N/A",
+      "set": "N/A",
+      "details": []
+    },
+    {
+      "tab": "/profile",
+      "mode": "UI_ONLY",
+      "get": "N/A",
+      "set": "N/A",
+      "details": []
+    },
+    {
+      "tab": "/profile-password",
+      "mode": "UI_ONLY",
+      "get": "N/A",
+      "set": "N/A",
+      "details": []
+    },
+    {
+      "tab": "/profile-mfa",
+      "mode": "UI_ONLY",
+      "get": "N/A",
+      "set": "N/A",
+      "details": []
+    },
+    {
+      "tab": "/profile-preferences",
+      "mode": "UI_ONLY",
+      "get": "N/A",
+      "set": "N/A",
+      "details": []
+    }
+  ]
+}
