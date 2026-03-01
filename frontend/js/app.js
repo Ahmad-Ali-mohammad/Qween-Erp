@@ -40,6 +40,10 @@ import { renderSection } from './modules/erp-sections.js';
 
 const navSections = [
   {
+    title: t('nav.dashboard', 'لوحة التحكم'),
+    items: [{ path: '/dashboard', label: 'الرئيسية' }]
+  },
+  {
     title: t('nav.quickActions', 'المدخل السريع'),
     items: [
       { path: '/quick-journal', label: 'قيد سريع' },
@@ -47,10 +51,6 @@ const navSections = [
       { path: '/quick-statement', label: 'كشف حساب' },
       { path: '/global-search', label: 'بحث شامل' }
     ]
-  },
-  {
-    title: t('nav.dashboard', 'لوحة التحكم'),
-    items: [{ path: '/dashboard', label: 'الرئيسية' }]
   },
   {
     title: t('nav.accounting', 'المحاسبة'),
