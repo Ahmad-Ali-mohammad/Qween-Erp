@@ -36,6 +36,7 @@ import syncRoutes from '../modules/sync/route';
 import orgRoutes from '../modules/org/route';
 import numberingRoutes from '../modules/numbering/route';
 import attachmentRoutes from '../modules/attachments/route';
+import printingRoutes from '../modules/printing/route';
 
 const router = Router();
 
@@ -49,6 +50,7 @@ router.use('/settings', settingsRoutes);
 router.use('/settings/numbering', numberingRoutes);
 router.use('/attachments', attachmentRoutes);
 router.use('/documents', attachmentRoutes);
+router.use('/printing', printingRoutes);
 router.use('/fiscal', fiscalRoutes);
 router.use('/fiscal-years', fiscalYearsRoutes);
 router.use('/periods', periodsRoutes);

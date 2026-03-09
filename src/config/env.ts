@@ -37,6 +37,9 @@ export const env = {
   fileStorageS3AccessKeyId: process.env.FILE_STORAGE_S3_ACCESS_KEY_ID ?? '',
   fileStorageS3SecretAccessKey: process.env.FILE_STORAGE_S3_SECRET_ACCESS_KEY ?? '',
   fileStorageS3ForcePathStyle: process.env.FILE_STORAGE_S3_FORCE_PATH_STYLE !== 'false',
+  printingQueueName: process.env.PRINTING_QUEUE_NAME ?? 'printing-jobs',
+  printingQueueConcurrency: Number(process.env.PRINTING_QUEUE_CONCURRENCY ?? 2),
+  printingQueueAttempts: Number(process.env.PRINTING_QUEUE_ATTEMPTS ?? 3),
   appTimezone: process.env.APP_TIMEZONE ?? 'Asia/Kuwait',
   appLocale: process.env.APP_LOCALE ?? 'ar-KW',
   baseCurrency: process.env.BASE_CURRENCY ?? 'KWD'
