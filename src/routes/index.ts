@@ -31,13 +31,17 @@ import purchaseReturnsRoutes from '../modules/purchase-returns/route';
 import erpExpansionRoutes from '../modules/erp-expansion/route';
 import analyticsRoutes from '../modules/analytics/route';
 import apiCompatRoutes from '../modules/api-compat/route';
+import orgRoutes from '../modules/org/route';
+import numberingRoutes from '../modules/numbering/route';
 
 const router = Router();
 
 router.use('/auth', authRoutes);
+router.use('/org', orgRoutes);
 router.use('/users', usersRoutes);
 router.use('/roles', rolesRoutes);
 router.use('/settings', settingsRoutes);
+router.use('/settings/numbering', numberingRoutes);
 router.use('/fiscal', fiscalRoutes);
 router.use('/fiscal-years', fiscalYearsRoutes);
 router.use('/periods', periodsRoutes);

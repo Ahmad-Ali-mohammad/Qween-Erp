@@ -45,15 +45,22 @@ const limiter = rateLimit({
 });
 app.use('/api', limiter);
 
-app.get('/api/health', (_req, res) => {
+const healthHandler = (_req: express.Request, res: express.Response) => {
   ok(res, {
     status: 'OK',
     timestamp: new Date().toISOString(),
     environment: env.nodeEnv,
-    uptime: process.uptime()
+    uptime: process.uptime(),
+    timezone: env.appTimezone,
+    locale: env.appLocale,
+    baseCurrency: env.baseCurrency
   });
-});
+};
 
+app.get('/api/health', healthHandler);
+app.get('/api/v1/health', healthHandler);
+
+app.use('/api/v1', apiRoutes);
 app.use('/api', apiRoutes);
 
 app.use(express.static(path.join(process.cwd(), 'frontend')));
