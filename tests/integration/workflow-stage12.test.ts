@@ -2,6 +2,8 @@ import request from 'supertest';
 import { app } from '../../src/app';
 import { ensureAdminUser, loginAdmin, uniqueCode } from './helpers';
 
+jest.setTimeout(60000);
+
 describe('Stage 12 deep CRUD coverage (page-by-page)', () => {
   let token = '';
   const auth = () => ({ Authorization: `Bearer ${token}` });

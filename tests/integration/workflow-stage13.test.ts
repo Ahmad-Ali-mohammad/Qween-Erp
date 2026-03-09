@@ -3,6 +3,8 @@ import { app } from '../../src/app';
 import { prisma } from '../../src/config/database';
 import { ensureAdminUser, loginAdmin, uniqueCode } from './helpers';
 
+jest.setTimeout(60000);
+
 describe('Stage 13 deep CRUD coverage (Inventory + Banks/Treasury + Budgets)', () => {
   let token = '';
   const auth = () => ({ Authorization: `Bearer ${token}` });

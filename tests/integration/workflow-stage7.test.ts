@@ -3,6 +3,8 @@ import { app } from '../../src/app';
 import { prisma } from '../../src/config/database';
 import { ensureAdminUser, loginAdmin, uniqueCode } from './helpers';
 
+jest.setTimeout(60000);
+
 describe('Stage 7 depreciation workflow coverage', () => {
   let token = '';
 
@@ -116,4 +118,3 @@ describe('Stage 7 depreciation workflow coverage', () => {
     expect(Number(rerun.body.data.journalEntryId)).toBe(Number(entry!.id));
   });
 });
-

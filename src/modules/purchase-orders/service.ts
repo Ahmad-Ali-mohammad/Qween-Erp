@@ -1,7 +1,8 @@
 import { prisma } from '../../config/database';
 import { parseDateOrThrow } from '../../utils/date';
-import { buildSequentialNumber, buildSequentialNumberFromLatest } from '../../utils/id-generator';
+import { buildSequentialNumber } from '../../utils/id-generator';
 import { Errors } from '../../utils/response';
+import { generateNextInvoiceNumber, withInvoiceNumberRetry } from '../shared/invoice-numbering';
 
 function calcLines(lines: any[]) {
   let subtotal = 0;
@@ -158,62 +159,56 @@ export async function convertPurchaseOrder(id: number, userId: number) {
   if (!current) throw Errors.notFound('طلب الشراء غير موجود');
   if (current.status !== 'SENT') throw Errors.business('يمكن تحويل طلب شراء مرسل فقط');
 
-  return prisma.$transaction(async (tx) => {
-    const lines = await tx.purchaseOrderLine.findMany({ where: { purchaseOrderId: id }, orderBy: { id: 'asc' } });
-    if (!lines.length) throw Errors.business('لا يمكن تحويل طلب شراء بدون بنود');
+  return withInvoiceNumberRetry(() =>
+    prisma.$transaction(async (tx) => {
+      const lines = await tx.purchaseOrderLine.findMany({ where: { purchaseOrderId: id }, orderBy: { id: 'asc' } });
+      if (!lines.length) throw Errors.business('لا يمكن تحويل طلب شراء بدون بنود');
 
-    const year = new Date().getUTCFullYear();
-    const latestInvoice = await tx.invoice.findFirst({
-      where: {
-        type: 'PURCHASE',
-        date: { gte: new Date(Date.UTC(year, 0, 1)), lt: new Date(Date.UTC(year + 1, 0, 1)) }
-      },
-      select: { number: true },
-      orderBy: { id: 'desc' }
-    });
-    const invoiceNumber = buildSequentialNumberFromLatest('PINV', latestInvoice?.number, year);
+      const invoiceDate = new Date();
+      const invoiceNumber = await generateNextInvoiceNumber(tx, 'PURCHASE', invoiceDate);
 
-    const taxableAmount = Number(current.subtotal) - Number(current.discount);
-    const invoice = await tx.invoice.create({
-      data: {
-        number: invoiceNumber,
-        type: 'PURCHASE',
-        date: new Date(),
-        dueDate: current.expectedDate,
-        supplierId: current.supplierId,
-        subtotal: current.subtotal,
-        discount: current.discount,
-        taxableAmount,
-        vatAmount: current.taxAmount,
-        total: current.total,
-        paidAmount: 0,
-        outstanding: current.total,
-        status: 'DRAFT',
-        paymentStatus: 'PENDING',
-        notes: `تحويل من طلب شراء ${current.number}`,
-        createdById: userId
-      }
-    });
+      const taxableAmount = Number(current.subtotal) - Number(current.discount);
+      const invoice = await tx.invoice.create({
+        data: {
+          number: invoiceNumber,
+          type: 'PURCHASE',
+          date: invoiceDate,
+          dueDate: current.expectedDate,
+          supplierId: current.supplierId,
+          subtotal: current.subtotal,
+          discount: current.discount,
+          taxableAmount,
+          vatAmount: current.taxAmount,
+          total: current.total,
+          paidAmount: 0,
+          outstanding: current.total,
+          status: 'DRAFT',
+          paymentStatus: 'PENDING',
+          notes: `تحويل من طلب شراء ${current.number}`,
+          createdById: userId
+        }
+      });
 
-    await tx.invoiceLine.createMany({
-      data: lines.map((line, index) => ({
-        invoiceId: invoice.id,
-        lineNumber: index + 1,
-        itemId: line.itemId,
-        description: line.description || `بند ${index + 1}`,
-        quantity: line.quantity,
-        unitPrice: line.unitPrice,
-        discount: line.discount,
-        taxRate: line.taxRate,
-        taxAmount: (Number(line.total) - (Number(line.quantity) * Number(line.unitPrice) - Number(line.discount))),
-        total: line.total
-      }))
-    });
+      await tx.invoiceLine.createMany({
+        data: lines.map((line, index) => ({
+          invoiceId: invoice.id,
+          lineNumber: index + 1,
+          itemId: line.itemId,
+          description: line.description || `بند ${index + 1}`,
+          quantity: line.quantity,
+          unitPrice: line.unitPrice,
+          discount: line.discount,
+          taxRate: line.taxRate,
+          taxAmount: (Number(line.total) - (Number(line.quantity) * Number(line.unitPrice) - Number(line.discount))),
+          total: line.total
+        }))
+      });
 
-    await tx.purchaseOrder.update({ where: { id }, data: { status: 'CONVERTED' } });
+      await tx.purchaseOrder.update({ where: { id }, data: { status: 'CONVERTED' } });
 
-    return { purchaseOrderId: id, invoiceId: invoice.id, invoiceNumber: invoice.number };
-  });
+      return { purchaseOrderId: id, invoiceId: invoice.id, invoiceNumber: invoice.number };
+    })
+  );
 }
 
 export async function listPurchaseOrders(query: any) {

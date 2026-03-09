@@ -188,7 +188,7 @@ export async function completePayment(id: number, userId: number, allocations: A
       data: { status: 'COMPLETED', journalEntryId: entry.id },
       include: { allocations: true }
     });
-  });
+  }, { maxWait: 10000, timeout: 60000 });
 }
 
 export async function cancelPayment(id: number, reason?: string) {

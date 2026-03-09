@@ -1,23 +1,13 @@
-﻿import { prisma } from '../../config/database';
+import { prisma } from '../../config/database';
 import { parseDateOrThrow } from '../../utils/date';
-import { buildSequentialNumberFromLatest } from '../../utils/id-generator';
 import { Errors } from '../../utils/response';
+import { buildSequentialNumberFromLatest } from '../../utils/id-generator';
+import { generateNextInvoiceNumber, invoiceNumberMatches, withInvoiceNumberRetry } from '../shared/invoice-numbering';
 import { applyLedgerLines } from '../shared/ledger';
 import { resolvePostingAccounts } from '../shared/posting-accounts';
 
-async function generateNumber(type: 'SALES' | 'PURCHASE', docDate: Date): Promise<string> {
-  const year = docDate.getUTCFullYear();
-  const prefix = type === 'SALES' ? 'INV' : 'PINV';
-  const latest = await prisma.invoice.findFirst({
-    where: {
-      type,
-      date: { gte: new Date(Date.UTC(year, 0, 1)), lt: new Date(Date.UTC(year + 1, 0, 1)) },
-      number: { startsWith: `${prefix}-${year}-` }
-    },
-    select: { number: true },
-    orderBy: { id: 'desc' }
-  });
-  return buildSequentialNumberFromLatest(prefix, latest?.number, year);
+async function generateNumber(tx: any, type: 'SALES' | 'PURCHASE', docDate: Date): Promise<string> {
+  return generateNextInvoiceNumber(tx, type, docDate);
 }
 
 function calcLines(lines: any[]) {
@@ -142,38 +132,41 @@ export async function createInvoice(data: any, userId: number) {
 
   const invoiceDate = parseDateOrThrow(data.date);
   const calc = calcLines(data.lines);
-  const number = await generateNumber(data.type, invoiceDate);
 
-  return prisma.$transaction(async (tx) => {
-    const invoice = await tx.invoice.create({
-      data: {
-        number,
-        type: data.type,
-        customerId: data.customerId,
-        supplierId: data.supplierId,
-        date: invoiceDate,
-        dueDate: data.dueDate ? parseDateOrThrow(data.dueDate, 'dueDate') : null,
-        projectId: data.projectId,
-        notes: data.notes,
-        subtotal: calc.subtotal,
-        discount: calc.discount,
-        taxableAmount: calc.taxableAmount,
-        vatAmount: calc.vatAmount,
-        total: calc.total,
-        paidAmount: 0,
-        outstanding: calc.total,
-        status: 'DRAFT',
-        paymentStatus: 'PENDING',
-        createdById: userId
-      }
-    });
+  return withInvoiceNumberRetry(() =>
+    prisma.$transaction(async (tx) => {
+      const number = await generateNumber(tx, data.type, invoiceDate);
 
-    await tx.invoiceLine.createMany({
-      data: calc.mapped.map((line) => ({ ...line, invoiceId: invoice.id }))
-    });
+      const invoice = await tx.invoice.create({
+        data: {
+          number,
+          type: data.type,
+          customerId: data.customerId,
+          supplierId: data.supplierId,
+          date: invoiceDate,
+          dueDate: data.dueDate ? parseDateOrThrow(data.dueDate, 'dueDate') : null,
+          projectId: data.projectId,
+          notes: data.notes,
+          subtotal: calc.subtotal,
+          discount: calc.discount,
+          taxableAmount: calc.taxableAmount,
+          vatAmount: calc.vatAmount,
+          total: calc.total,
+          paidAmount: 0,
+          outstanding: calc.total,
+          status: 'DRAFT',
+          paymentStatus: 'PENDING',
+          createdById: userId
+        }
+      });
 
-    return invoice;
-  });
+      await tx.invoiceLine.createMany({
+        data: calc.mapped.map((line) => ({ ...line, invoiceId: invoice.id }))
+      });
+
+      return invoice;
+    })
+  );
 }
 
 export async function issueInvoice(id: number, userId: number) {
@@ -201,47 +194,55 @@ export async function updateInvoice(id: number, data: any) {
   if (!current) throw Errors.notFound('الفاتورة غير موجودة');
   if (current.status !== 'DRAFT') throw Errors.business('لا يمكن تعديل فاتورة بعد الإصدار');
 
-  return prisma.$transaction(async (tx) => {
-    const nextLines = data.lines ?? current.lines.map((l) => ({
-      itemId: l.itemId,
-      description: l.description,
-      quantity: Number(l.quantity),
-      unitPrice: Number(l.unitPrice),
-      discount: Number(l.discount),
-      taxRate: Number(l.taxRate),
-      accountId: l.accountId
-    }));
+  const nextType = data.type ?? current.type;
+  const nextDate = data.date ? parseDateOrThrow(data.date) : current.date;
+  const shouldRenumber = !invoiceNumberMatches(nextType, nextDate, current.number);
 
-    const calc = calcLines(nextLines);
+  return withInvoiceNumberRetry(() =>
+    prisma.$transaction(async (tx) => {
+      const nextLines = data.lines ?? current.lines.map((l) => ({
+        itemId: l.itemId,
+        description: l.description,
+        quantity: Number(l.quantity),
+        unitPrice: Number(l.unitPrice),
+        discount: Number(l.discount),
+        taxRate: Number(l.taxRate),
+        accountId: l.accountId
+      }));
 
-    const invoice = await tx.invoice.update({
-      where: { id },
-      data: {
-        type: data.type ?? current.type,
-        customerId: data.customerId ?? current.customerId,
-        supplierId: data.supplierId ?? current.supplierId,
-        date: data.date ? parseDateOrThrow(data.date) : current.date,
-        dueDate: data.dueDate ? parseDateOrThrow(data.dueDate, 'dueDate') : current.dueDate,
-        projectId: data.projectId ?? current.projectId,
-        notes: data.notes ?? current.notes,
-        subtotal: calc.subtotal,
-        discount: calc.discount,
-        taxableAmount: calc.taxableAmount,
-        vatAmount: calc.vatAmount,
-        total: calc.total,
-        outstanding: calc.total
-      }
-    });
+      const calc = calcLines(nextLines);
+      const number = shouldRenumber ? await generateNumber(tx, nextType, nextDate) : current.number;
 
-    if (data.lines) {
-      await tx.invoiceLine.deleteMany({ where: { invoiceId: id } });
-      await tx.invoiceLine.createMany({
-        data: calc.mapped.map((line) => ({ ...line, invoiceId: id }))
+      const invoice = await tx.invoice.update({
+        where: { id },
+        data: {
+          number,
+          type: nextType,
+          customerId: data.customerId ?? current.customerId,
+          supplierId: data.supplierId ?? current.supplierId,
+          date: nextDate,
+          dueDate: data.dueDate ? parseDateOrThrow(data.dueDate, 'dueDate') : current.dueDate,
+          projectId: data.projectId ?? current.projectId,
+          notes: data.notes ?? current.notes,
+          subtotal: calc.subtotal,
+          discount: calc.discount,
+          taxableAmount: calc.taxableAmount,
+          vatAmount: calc.vatAmount,
+          total: calc.total,
+          outstanding: calc.total
+        }
       });
-    }
 
-    return invoice;
-  });
+      if (data.lines) {
+        await tx.invoiceLine.deleteMany({ where: { invoiceId: id } });
+        await tx.invoiceLine.createMany({
+          data: calc.mapped.map((line) => ({ ...line, invoiceId: id }))
+        });
+      }
+
+      return invoice;
+    })
+  );
 }
 
 export async function cancelInvoice(id: number, reason?: string) {
@@ -277,6 +278,8 @@ export async function listInvoices(query: any) {
   if (query.status) where.status = query.status;
   if (query.customerId) where.customerId = Number(query.customerId);
   if (query.supplierId) where.supplierId = Number(query.supplierId);
+  if (query.projectId) where.projectId = Number(query.projectId);
+  else if (Array.isArray(query.projectIds) && query.projectIds.length) where.projectId = { in: query.projectIds.map(Number) };
 
   const [rows, total] = await Promise.all([
     prisma.invoice.findMany({

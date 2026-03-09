@@ -1,7 +1,7 @@
-﻿import { Router } from 'express';
+import { Router } from 'express';
 import { validateBody } from '../../middleware/validate';
 import { authenticate } from '../../middleware/auth';
-import { loginSchema, refreshSchema } from './dto';
+import { forgotPasswordSchema, loginSchema, refreshSchema, resetPasswordSchema } from './dto';
 import * as service from './service';
 import { ok } from '../../utils/response';
 
@@ -10,6 +10,24 @@ const router = Router();
 router.post('/login', validateBody(loginSchema), async (req, res, next) => {
   try {
     const result = await service.login(req.body.username, req.body.password);
+    ok(res, result);
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post('/forgot-password', validateBody(forgotPasswordSchema), async (req, res, next) => {
+  try {
+    const result = await service.requestPasswordReset(req.body.username);
+    ok(res, result, undefined, 202);
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post('/reset-password', validateBody(resetPasswordSchema), async (req, res, next) => {
+  try {
+    const result = await service.resetPassword(req.body.username, req.body.token, req.body.newPassword);
     ok(res, result);
   } catch (error) {
     next(error);
