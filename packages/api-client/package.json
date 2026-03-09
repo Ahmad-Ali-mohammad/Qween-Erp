@@ -1,0 +1,12 @@
+{
+  "name": "@erp-qween/api-client",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@erp-qween/auth-client": "0.1.0"
+  }
+}
