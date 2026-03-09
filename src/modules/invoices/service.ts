@@ -2,33 +2,12 @@ import { prisma } from '../../config/database';
 import { parseDateOrThrow } from '../../utils/date';
 import { Errors } from '../../utils/response';
 import { buildSequentialNumberFromLatest } from '../../utils/id-generator';
+import { generateNextInvoiceNumber, invoiceNumberMatches, withInvoiceNumberRetry } from '../shared/invoice-numbering';
 import { applyLedgerLines } from '../shared/ledger';
 import { resolvePostingAccounts } from '../shared/posting-accounts';
 
 async function generateNumber(tx: any, type: 'SALES' | 'PURCHASE', docDate: Date): Promise<string> {
-  const year = docDate.getUTCFullYear();
-  const month = String(docDate.getUTCMonth() + 1).padStart(2, '0');
-  const prefix = type === 'SALES' ? 'INV' : 'PINV';
-  const sequencePrefix = `${prefix}-${year}-${month}-`;
-
-  await tx.$executeRawUnsafe('LOCK TABLE "Invoice" IN EXCLUSIVE MODE');
-  const existing = await tx.invoice.findMany({
-    where: {
-      type,
-      number: { startsWith: sequencePrefix }
-    },
-    select: { number: true }
-  });
-
-  let maxSequence = 0;
-  for (const row of existing) {
-    const sequence = Number.parseInt(String(row.number).slice(sequencePrefix.length), 10);
-    if (Number.isInteger(sequence) && sequence > maxSequence) {
-      maxSequence = sequence;
-    }
-  }
-
-  return `${sequencePrefix}${String(maxSequence + 1).padStart(5, '0')}`;
+  return generateNextInvoiceNumber(tx, type, docDate);
 }
 
 function calcLines(lines: any[]) {
@@ -154,38 +133,40 @@ export async function createInvoice(data: any, userId: number) {
   const invoiceDate = parseDateOrThrow(data.date);
   const calc = calcLines(data.lines);
 
-  return prisma.$transaction(async (tx) => {
-    const number = await generateNumber(tx, data.type, invoiceDate);
+  return withInvoiceNumberRetry(() =>
+    prisma.$transaction(async (tx) => {
+      const number = await generateNumber(tx, data.type, invoiceDate);
 
-    const invoice = await tx.invoice.create({
-      data: {
-        number,
-        type: data.type,
-        customerId: data.customerId,
-        supplierId: data.supplierId,
-        date: invoiceDate,
-        dueDate: data.dueDate ? parseDateOrThrow(data.dueDate, 'dueDate') : null,
-        projectId: data.projectId,
-        notes: data.notes,
-        subtotal: calc.subtotal,
-        discount: calc.discount,
-        taxableAmount: calc.taxableAmount,
-        vatAmount: calc.vatAmount,
-        total: calc.total,
-        paidAmount: 0,
-        outstanding: calc.total,
-        status: 'DRAFT',
-        paymentStatus: 'PENDING',
-        createdById: userId
-      }
-    });
+      const invoice = await tx.invoice.create({
+        data: {
+          number,
+          type: data.type,
+          customerId: data.customerId,
+          supplierId: data.supplierId,
+          date: invoiceDate,
+          dueDate: data.dueDate ? parseDateOrThrow(data.dueDate, 'dueDate') : null,
+          projectId: data.projectId,
+          notes: data.notes,
+          subtotal: calc.subtotal,
+          discount: calc.discount,
+          taxableAmount: calc.taxableAmount,
+          vatAmount: calc.vatAmount,
+          total: calc.total,
+          paidAmount: 0,
+          outstanding: calc.total,
+          status: 'DRAFT',
+          paymentStatus: 'PENDING',
+          createdById: userId
+        }
+      });
 
-    await tx.invoiceLine.createMany({
-      data: calc.mapped.map((line) => ({ ...line, invoiceId: invoice.id }))
-    });
+      await tx.invoiceLine.createMany({
+        data: calc.mapped.map((line) => ({ ...line, invoiceId: invoice.id }))
+      });
 
-    return invoice;
-  });
+      return invoice;
+    })
+  );
 }
 
 export async function issueInvoice(id: number, userId: number) {
@@ -213,47 +194,55 @@ export async function updateInvoice(id: number, data: any) {
   if (!current) throw Errors.notFound('الفاتورة غير موجودة');
   if (current.status !== 'DRAFT') throw Errors.business('لا يمكن تعديل فاتورة بعد الإصدار');
 
-  return prisma.$transaction(async (tx) => {
-    const nextLines = data.lines ?? current.lines.map((l) => ({
-      itemId: l.itemId,
-      description: l.description,
-      quantity: Number(l.quantity),
-      unitPrice: Number(l.unitPrice),
-      discount: Number(l.discount),
-      taxRate: Number(l.taxRate),
-      accountId: l.accountId
-    }));
+  const nextType = data.type ?? current.type;
+  const nextDate = data.date ? parseDateOrThrow(data.date) : current.date;
+  const shouldRenumber = !invoiceNumberMatches(nextType, nextDate, current.number);
 
-    const calc = calcLines(nextLines);
+  return withInvoiceNumberRetry(() =>
+    prisma.$transaction(async (tx) => {
+      const nextLines = data.lines ?? current.lines.map((l) => ({
+        itemId: l.itemId,
+        description: l.description,
+        quantity: Number(l.quantity),
+        unitPrice: Number(l.unitPrice),
+        discount: Number(l.discount),
+        taxRate: Number(l.taxRate),
+        accountId: l.accountId
+      }));
 
-    const invoice = await tx.invoice.update({
-      where: { id },
-      data: {
-        type: data.type ?? current.type,
-        customerId: data.customerId ?? current.customerId,
-        supplierId: data.supplierId ?? current.supplierId,
-        date: data.date ? parseDateOrThrow(data.date) : current.date,
-        dueDate: data.dueDate ? parseDateOrThrow(data.dueDate, 'dueDate') : current.dueDate,
-        projectId: data.projectId ?? current.projectId,
-        notes: data.notes ?? current.notes,
-        subtotal: calc.subtotal,
-        discount: calc.discount,
-        taxableAmount: calc.taxableAmount,
-        vatAmount: calc.vatAmount,
-        total: calc.total,
-        outstanding: calc.total
-      }
-    });
+      const calc = calcLines(nextLines);
+      const number = shouldRenumber ? await generateNumber(tx, nextType, nextDate) : current.number;
 
-    if (data.lines) {
-      await tx.invoiceLine.deleteMany({ where: { invoiceId: id } });
-      await tx.invoiceLine.createMany({
-        data: calc.mapped.map((line) => ({ ...line, invoiceId: id }))
+      const invoice = await tx.invoice.update({
+        where: { id },
+        data: {
+          number,
+          type: nextType,
+          customerId: data.customerId ?? current.customerId,
+          supplierId: data.supplierId ?? current.supplierId,
+          date: nextDate,
+          dueDate: data.dueDate ? parseDateOrThrow(data.dueDate, 'dueDate') : current.dueDate,
+          projectId: data.projectId ?? current.projectId,
+          notes: data.notes ?? current.notes,
+          subtotal: calc.subtotal,
+          discount: calc.discount,
+          taxableAmount: calc.taxableAmount,
+          vatAmount: calc.vatAmount,
+          total: calc.total,
+          outstanding: calc.total
+        }
       });
-    }
 
-    return invoice;
-  });
+      if (data.lines) {
+        await tx.invoiceLine.deleteMany({ where: { invoiceId: id } });
+        await tx.invoiceLine.createMany({
+          data: calc.mapped.map((line) => ({ ...line, invoiceId: id }))
+        });
+      }
+
+      return invoice;
+    })
+  );
 }
 
 export async function cancelInvoice(id: number, reason?: string) {

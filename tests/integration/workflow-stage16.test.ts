@@ -21,6 +21,7 @@ describe('Stage 16 deep CRUD coverage (Sales + Purchasing)', () => {
     let contactId = 0;
     let quoteConvertedId = 0;
     let quoteDeletedId = 0;
+    let invoiceRenumberId = 0;
     let invoicePaidId = 0;
     let invoiceCancelledId = 0;
     let invoiceReturnBaseId = 0;
@@ -83,6 +84,30 @@ describe('Stage 16 deep CRUD coverage (Sales + Purchasing)', () => {
 
       const quotationDelete = await request(app).delete(`/api/quotations/${quoteDeletedId}`).set(auth());
       expect(quotationDelete.status).toBe(200);
+
+      const invoiceRenumberCreate = await request(app).post('/api/sales-invoices').set(auth()).send({
+        customerId,
+        date: new Date().toISOString(),
+        lines: [{ description: 'Sales invoice renumber', quantity: 1, unitPrice: 40, taxRate: 15 }]
+      });
+      expect(invoiceRenumberCreate.status).toBe(201);
+      invoiceRenumberId = Number(invoiceRenumberCreate.body.data.id);
+
+      const previousMonth = new Date();
+      previousMonth.setUTCDate(1);
+      previousMonth.setUTCMonth(previousMonth.getUTCMonth() - 1);
+      const expectedRenumberPrefix = `INV-${previousMonth.getUTCFullYear()}-${String(previousMonth.getUTCMonth() + 1).padStart(2, '0')}-`;
+
+      const invoiceRenumberUpdate = await request(app).put(`/api/sales-invoices/${invoiceRenumberId}`).set(auth()).send({
+        date: previousMonth.toISOString(),
+        lines: [{ description: 'Sales invoice renumber updated', quantity: 1, unitPrice: 40, taxRate: 15 }]
+      });
+      expect(invoiceRenumberUpdate.status).toBe(200);
+      expect(String(invoiceRenumberUpdate.body.data.number)).toContain(expectedRenumberPrefix);
+
+      const invoiceRenumberDelete = await request(app).delete(`/api/sales-invoices/${invoiceRenumberId}`).set(auth());
+      expect(invoiceRenumberDelete.status).toBe(200);
+      invoiceRenumberId = 0;
 
       const invoicePaidCreate = await request(app).post('/api/sales-invoices').set(auth()).send({
         customerId,
@@ -192,9 +217,9 @@ describe('Stage 16 deep CRUD coverage (Sales + Purchasing)', () => {
     } finally {
       if (salesReturnId) await prisma.salesReturn.deleteMany({ where: { id: salesReturnId } });
       if (receiptCompletedId) await prisma.payment.deleteMany({ where: { id: receiptCompletedId } });
-      if (invoicePaidId || invoiceCancelledId || invoiceReturnBaseId) {
+      if (invoiceRenumberId || invoicePaidId || invoiceCancelledId || invoiceReturnBaseId) {
         await prisma.invoice.deleteMany({
-          where: { id: { in: [invoicePaidId, invoiceCancelledId, invoiceReturnBaseId].filter((x) => x > 0) } }
+          where: { id: { in: [invoiceRenumberId, invoicePaidId, invoiceCancelledId, invoiceReturnBaseId].filter((x) => x > 0) } }
         });
       }
       if (quoteConvertedId || quoteDeletedId) {

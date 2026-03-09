@@ -281,9 +281,11 @@ describe('Stage 14 deep workflow coverage (Help/Support + Profile/Auth)', () => 
       const forgotPassword = await request(app).post('/api/auth/forgot-password').send({ username });
       expect(forgotPassword.status).toBe(202);
       expect(forgotPassword.body.success).toBe(true);
+      expect(typeof forgotPassword.body.data.resetToken).toBe('string');
 
       const resetPassword = await request(app).post('/api/auth/reset-password').send({
         username,
+        token: forgotPassword.body.data.resetToken,
         newPassword: password4
       });
       expect(resetPassword.status).toBe(200);

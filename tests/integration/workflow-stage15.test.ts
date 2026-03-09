@@ -130,7 +130,10 @@ describe('Stage 15 guard rails coverage (negative workflows)', () => {
     expect(role).toBeTruthy();
 
     const username = uniqueCode('u15').toLowerCase();
-    const password = 'pass1501';
+    const password = `${uniqueCode('pw15a')}Aa1!`;
+    const changedPassword1 = `${uniqueCode('pw15b')}Bb2!`;
+    const changedPassword2 = `${uniqueCode('pw15c')}Cc3!`;
+    const changedPassword3 = `${uniqueCode('pw15d')}Dd4!`;
     let userId = 0;
     let userToken = '';
 
@@ -159,24 +162,37 @@ describe('Stage 15 guard rails coverage (negative workflows)', () => {
       const badProfileChange = await request(app)
         .post('/api/profile/change-password')
         .set(userAuth())
-        .send({ currentPassword: 'wrong-pass', newPassword: 'pass1502' });
+        .send({ currentPassword: 'invalid-current', newPassword: changedPassword1 });
       expect([400, 422]).toContain(badProfileChange.status);
 
       const badAuthChange = await request(app)
         .post('/api/auth/change-password')
         .set(userAuth())
-        .send({ currentPassword: 'wrong-pass', newPassword: 'pass1503' });
+        .send({ currentPassword: 'invalid-current', newPassword: changedPassword2 });
       expect([400, 422]).toContain(badAuthChange.status);
+
+      const forgotPassword = await request(app).post('/api/auth/forgot-password').send({ username });
+      expect(forgotPassword.status).toBe(202);
+      expect(typeof forgotPassword.body.data.resetToken).toBe('string');
 
       const resetTooShort = await request(app).post('/api/auth/reset-password').send({
         username,
+        token: forgotPassword.body.data.resetToken,
         newPassword: '123'
       });
       expect([400, 422]).toContain(resetTooShort.status);
 
+      const resetInvalidToken = await request(app).post('/api/auth/reset-password').send({
+        username,
+        token: 'invalid.token',
+        newPassword: changedPassword2
+      });
+      expect(resetInvalidToken.status).toBe(401);
+
       const resetUnknownUser = await request(app).post('/api/auth/reset-password').send({
         username: uniqueCode('nouser15').toLowerCase(),
-        newPassword: 'pass1599'
+        token: forgotPassword.body.data.resetToken,
+        newPassword: changedPassword3
       });
       expect(resetUnknownUser.status).toBe(404);
     } finally {

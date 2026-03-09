@@ -2,9 +2,12 @@ import { Router, Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import { prisma } from '../../config/database';
 import { authenticate } from '../../middleware/auth';
+import { validateBody } from '../../middleware/validate';
 import { ok, Errors } from '../../utils/response';
 import { PERMISSIONS } from '../../constants/permissions';
 import { buildSequentialNumber, buildSequentialNumberFromLatest } from '../../utils/id-generator';
+import { forgotPasswordSchema, resetPasswordSchema } from '../auth/dto';
+import * as authService from '../auth/service';
 import * as journalService from '../journals/service';
 import * as invoiceService from '../invoices/service';
 import * as paymentService from '../payments/service';
@@ -18,7 +21,7 @@ const router = Router();
 
 function parsePositiveInt(value: unknown, name: string): number {
   const n = Number(value);
-  if (!Number.isInteger(n) || n <= 0) throw Errors.validation(`${name} غير صالح`);
+  if (!Number.isInteger(n) || n <= 0) throw Errors.validation(`${name} ØºÙŠØ± ØµØ§Ù„Ø­`);
   return n;
 }
 
@@ -51,19 +54,22 @@ function splitIntegrationKey(key: string): { prefix: string; id: number } | null
 }
 
 // Public auth compatibility
-router.post('/auth/forgot-password', async (_req: Request, res: Response) => {
-  ok(res, { accepted: true, message: 'تم استلام طلب إعادة التعيين' }, undefined, 202);
+router.post('/auth/forgot-password', validateBody(forgotPasswordSchema), async (req: Request, res: Response, next) => {
+  try {
+    const result = await authService.requestPasswordReset(req.body.username);
+    ok(res, result, undefined, 202);
+  } catch (error) {
+    next(error);
+  }
 });
 
-router.post('/auth/reset-password', async (req: Request, res: Response) => {
-  const username = String(req.body?.username ?? '').trim();
-  const newPassword = String(req.body?.newPassword ?? '').trim();
-  if (!username || newPassword.length < 6) throw Errors.validation('بيانات إعادة التعيين غير مكتملة');
-  const user = await prisma.user.findUnique({ where: { username } });
-  if (!user) throw Errors.notFound('المستخدم غير موجود');
-  const password = await bcrypt.hash(newPassword, 10);
-  await prisma.user.update({ where: { id: user.id }, data: { password, failedLoginCount: 0, lockedUntil: null } });
-  ok(res, { reset: true });
+router.post('/auth/reset-password', validateBody(resetPasswordSchema), async (req: Request, res: Response, next) => {
+  try {
+    const result = await authService.resetPassword(req.body.username, req.body.token, req.body.newPassword);
+    ok(res, result);
+  } catch (error) {
+    next(error);
+  }
 });
 
 router.use(authenticate);
@@ -95,7 +101,7 @@ router.post('/quick-journal', async (req: any, res: Response) => {
     const debitAccountId = Number(req.body?.debitAccountId ?? 0);
     const creditAccountId = Number(req.body?.creditAccountId ?? 0);
     const amount = Number(req.body?.amount ?? 0);
-    if (!debitAccountId || !creditAccountId || amount <= 0) throw Errors.validation('بيانات القيد السريع غير مكتملة');
+    if (!debitAccountId || !creditAccountId || amount <= 0) throw Errors.validation('Ø¨ÙŠØ§Ù†Ø§Øª Ø§Ù„Ù‚ÙŠØ¯ Ø§Ù„Ø³Ø±ÙŠØ¹ ØºÙŠØ± Ù…ÙƒØªÙ…Ù„Ø©');
     lines = [
       { accountId: debitAccountId, debit: amount, credit: 0, description },
       { accountId: creditAccountId, debit: 0, credit: amount, description }
@@ -368,7 +374,7 @@ router.post('/fiscal-years/:id/open', async (req: Request, res: Response) => {
 router.post('/year-end-closing/:fiscalYearId/validate', async (req: Request, res: Response) => {
   const fiscalYearId = parsePositiveInt(req.params.fiscalYearId, 'fiscalYearId');
   const fiscalYear = await prisma.fiscalYear.findUnique({ where: { id: fiscalYearId } });
-  if (!fiscalYear) throw Errors.notFound('السنة المالية غير موجودة');
+  if (!fiscalYear) throw Errors.notFound('Ø§Ù„Ø³Ù†Ø© Ø§Ù„Ù…Ø§Ù„ÙŠØ© ØºÙŠØ± Ù…ÙˆØ¬ÙˆØ¯Ø©');
   const [draftEntries, openPeriods] = await Promise.all([
     prisma.journalEntry.count({ where: { status: 'DRAFT', date: { gte: fiscalYear.startDate, lte: fiscalYear.endDate } } }),
     prisma.accountingPeriod.count({ where: { fiscalYearId, status: 'OPEN' } })
@@ -700,7 +706,7 @@ router.get('/sales-invoices/:id', async (req: Request, res: Response) => {
     where: { id, type: 'SALES' },
     include: { customer: true, lines: true, payments: { include: { payment: true } } }
   });
-  if (!row) throw Errors.notFound('فاتورة المبيعات غير موجودة');
+  if (!row) throw Errors.notFound('ÙØ§ØªÙˆØ±Ø© Ø§Ù„Ù…Ø¨ÙŠØ¹Ø§Øª ØºÙŠØ± Ù…ÙˆØ¬ÙˆØ¯Ø©');
   ok(res, row);
 });
 
@@ -738,14 +744,14 @@ router.get('/sales-invoices/:id/payments', async (req: Request, res: Response) =
 router.get('/sales-invoices/:id/print', async (req: Request, res: Response) => {
   const id = parsePositiveInt(req.params.id, 'invoiceId');
   const invoice = await prisma.invoice.findUnique({ where: { id }, include: { customer: true, lines: true } });
-  if (!invoice || invoice.type !== 'SALES') throw Errors.notFound('فاتورة المبيعات غير موجودة');
+  if (!invoice || invoice.type !== 'SALES') throw Errors.notFound('ÙØ§ØªÙˆØ±Ø© Ø§Ù„Ù…Ø¨ÙŠØ¹Ø§Øª ØºÙŠØ± Ù…ÙˆØ¬ÙˆØ¯Ø©');
   ok(res, { invoiceId: id, format: 'PDF', generated: true, pdfUrl: null, invoice });
 });
 
 router.post('/sales-invoices/:id/email', async (req: Request, res: Response) => {
   const id = parsePositiveInt(req.params.id, 'invoiceId');
   const email = String(req.body?.email ?? '').trim();
-  if (!email) throw Errors.validation('البريد الإلكتروني مطلوب');
+  if (!email) throw Errors.validation('Ø§Ù„Ø¨Ø±ÙŠØ¯ Ø§Ù„Ø¥Ù„ÙƒØªØ±ÙˆÙ†ÙŠ Ù…Ø·Ù„ÙˆØ¨');
   ok(res, { sent: true, invoiceId: id, email }, undefined, 202);
 });
 
@@ -760,7 +766,7 @@ router.get('/purchase-invoices/:id', async (req: Request, res: Response) => {
     where: { id, type: 'PURCHASE' },
     include: { supplier: true, lines: true, payments: { include: { payment: true } } }
   });
-  if (!row) throw Errors.notFound('فاتورة الشراء غير موجودة');
+  if (!row) throw Errors.notFound('ÙØ§ØªÙˆØ±Ø© Ø§Ù„Ø´Ø±Ø§Ø¡ ØºÙŠØ± Ù…ÙˆØ¬ÙˆØ¯Ø©');
   ok(res, row);
 });
 
@@ -800,8 +806,8 @@ router.post('/purchase-invoices/:id/receive', async (req: Request, res: Response
       where: { id, type: 'PURCHASE' },
       include: { lines: true }
     });
-    if (!invoice) throw Errors.notFound('فاتورة الشراء غير موجودة');
-    if (invoice.status !== 'ISSUED') throw Errors.business('يمكن استلام بضائع فاتورة شراء معتمدة فقط');
+    if (!invoice) throw Errors.notFound('ÙØ§ØªÙˆØ±Ø© Ø§Ù„Ø´Ø±Ø§Ø¡ ØºÙŠØ± Ù…ÙˆØ¬ÙˆØ¯Ø©');
+    if (invoice.status !== 'ISSUED') throw Errors.business('ÙŠÙ…ÙƒÙ† Ø§Ø³ØªÙ„Ø§Ù… Ø¨Ø¶Ø§Ø¦Ø¹ ÙØ§ØªÙˆØ±Ø© Ø´Ø±Ø§Ø¡ Ù…Ø¹ØªÙ…Ø¯Ø© ÙÙ‚Ø·');
 
     const existing = await tx.purchaseReceipt.findFirst({
       where: { notes: { contains: `invoiceId=${id};` } }
@@ -816,11 +822,11 @@ router.post('/purchase-invoices/:id/receive', async (req: Request, res: Response
       const defaultWarehouse = await tx.warehouse.findFirst({ orderBy: { id: 'asc' } });
       warehouseId = defaultWarehouse?.id ?? null;
     }
-    if (itemLines.length && !warehouseId) throw Errors.validation('warehouseId مطلوب لاستلام الأصناف المخزنية');
+    if (itemLines.length && !warehouseId) throw Errors.validation('warehouseId Ù…Ø·Ù„ÙˆØ¨ Ù„Ø§Ø³ØªÙ„Ø§Ù… Ø§Ù„Ø£ØµÙ†Ø§Ù Ø§Ù„Ù…Ø®Ø²Ù†ÙŠØ©');
 
     if (warehouseId) {
       const warehouse = await tx.warehouse.findUnique({ where: { id: warehouseId } });
-      if (!warehouse) throw Errors.notFound('المستودع غير موجود');
+      if (!warehouse) throw Errors.notFound('Ø§Ù„Ù…Ø³ØªÙˆØ¯Ø¹ ØºÙŠØ± Ù…ÙˆØ¬ÙˆØ¯');
     }
 
     const receiptCount = await tx.purchaseReceipt.count();
@@ -854,7 +860,7 @@ router.post('/purchase-invoices/:id/receive', async (req: Request, res: Response
           quantity,
           unitCost,
           totalCost,
-          notes: `استلام فاتورة شراء ${invoice.number}`
+          notes: `Ø§Ø³ØªÙ„Ø§Ù… ÙØ§ØªÙˆØ±Ø© Ø´Ø±Ø§Ø¡ ${invoice.number}`
         }
       });
 
@@ -952,7 +958,7 @@ router.get('/payment-receipts/:id', async (req: Request, res: Response) => {
     where: { id, type: 'RECEIPT' },
     include: { customer: true, bank: true, allocations: { include: { invoice: true } } }
   });
-  if (!row) throw Errors.notFound('سند القبض غير موجود');
+  if (!row) throw Errors.notFound('Ø³Ù†Ø¯ Ø§Ù„Ù‚Ø¨Ø¶ ØºÙŠØ± Ù…ÙˆØ¬ÙˆØ¯');
   ok(res, row);
 });
 
@@ -998,7 +1004,7 @@ router.get('/payment-vouchers/:id', async (req: Request, res: Response) => {
     where: { id, type: 'PAYMENT' },
     include: { supplier: true, bank: true, allocations: { include: { invoice: true } } }
   });
-  if (!row) throw Errors.notFound('سند الدفع غير موجود');
+  if (!row) throw Errors.notFound('Ø³Ù†Ø¯ Ø§Ù„Ø¯ÙØ¹ ØºÙŠØ± Ù…ÙˆØ¬ÙˆØ¯');
   ok(res, row);
 });
 
@@ -1355,18 +1361,18 @@ router.post('/tasks/:id/assign', async (req: Request, res: Response) => {
 router.patch('/tasks/:id/status', async (req: Request, res: Response) => {
   const id = parsePositiveInt(req.params.id, 'taskId');
   const status = String(req.body?.status ?? '').trim();
-  if (!status) throw Errors.validation('status مطلوب');
+  if (!status) throw Errors.validation('status Ù…Ø·Ù„ÙˆØ¨');
   ok(res, await prisma.userTask.update({ where: { id }, data: { status } }));
 });
 
 router.post('/auth/change-password', async (req: any, res: Response) => {
   const currentPassword = String(req.body?.currentPassword ?? '');
   const newPassword = String(req.body?.newPassword ?? '');
-  if (newPassword.length < 6) throw Errors.validation('كلمة المرور الجديدة قصيرة');
+  if (newPassword.length < 6) throw Errors.validation('ÙƒÙ„Ù…Ø© Ø§Ù„Ù…Ø±ÙˆØ± Ø§Ù„Ø¬Ø¯ÙŠØ¯Ø© Ù‚ØµÙŠØ±Ø©');
   const user = await prisma.user.findUnique({ where: { id: Number(req.user.id) } });
-  if (!user) throw Errors.notFound('المستخدم غير موجود');
+  if (!user) throw Errors.notFound('Ø§Ù„Ù…Ø³ØªØ®Ø¯Ù… ØºÙŠØ± Ù…ÙˆØ¬ÙˆØ¯');
   const match = await bcrypt.compare(currentPassword, user.password);
-  if (!match) throw Errors.validation('كلمة المرور الحالية غير صحيحة');
+  if (!match) throw Errors.validation('ÙƒÙ„Ù…Ø© Ø§Ù„Ù…Ø±ÙˆØ± Ø§Ù„Ø­Ø§Ù„ÙŠØ© ØºÙŠØ± ØµØ­ÙŠØ­Ø©');
   const hashed = await bcrypt.hash(newPassword, 10);
   await prisma.user.update({ where: { id: user.id }, data: { password: hashed } });
   ok(res, { changed: true });
@@ -1395,11 +1401,11 @@ router.put('/profile', async (req: any, res: Response) => {
 router.post('/profile/change-password', async (req: any, res: Response) => {
   const currentPassword = String(req.body?.currentPassword ?? '');
   const newPassword = String(req.body?.newPassword ?? '');
-  if (newPassword.length < 6) throw Errors.validation('كلمة المرور الجديدة قصيرة');
+  if (newPassword.length < 6) throw Errors.validation('ÙƒÙ„Ù…Ø© Ø§Ù„Ù…Ø±ÙˆØ± Ø§Ù„Ø¬Ø¯ÙŠØ¯Ø© Ù‚ØµÙŠØ±Ø©');
   const user = await prisma.user.findUnique({ where: { id: Number(req.user.id) } });
-  if (!user) throw Errors.notFound('المستخدم غير موجود');
+  if (!user) throw Errors.notFound('Ø§Ù„Ù…Ø³ØªØ®Ø¯Ù… ØºÙŠØ± Ù…ÙˆØ¬ÙˆØ¯');
   const match = await bcrypt.compare(currentPassword, user.password);
-  if (!match) throw Errors.validation('كلمة المرور الحالية غير صحيحة');
+  if (!match) throw Errors.validation('ÙƒÙ„Ù…Ø© Ø§Ù„Ù…Ø±ÙˆØ± Ø§Ù„Ø­Ø§Ù„ÙŠØ© ØºÙŠØ± ØµØ­ÙŠØ­Ø©');
   const hashed = await bcrypt.hash(newPassword, 10);
   await prisma.user.update({ where: { id: user.id }, data: { password: hashed } });
   ok(res, { changed: true });
@@ -1419,7 +1425,7 @@ router.get('/settings/sequences', async (_req: Request, res: Response) => {
 router.put('/settings/sequences/:entity', async (req: Request, res: Response) => {
   const entity = String(req.params.entity).toLowerCase();
   const prefix = String(req.body?.prefix ?? '').trim();
-  if (!prefix) throw Errors.validation('prefix مطلوب');
+  if (!prefix) throw Errors.validation('prefix Ù…Ø·Ù„ÙˆØ¨');
   const data: any = {};
   if (entity === 'invoice' || entity === 'sales-invoice') data.invoicePrefix = prefix;
   if (entity === 'quote' || entity === 'quotation') data.quotePrefix = prefix;
@@ -1434,16 +1440,16 @@ router.put('/settings/sequences/:entity', async (req: Request, res: Response) =>
 router.get('/users/:id/permissions', async (req: Request, res: Response) => {
   const id = parsePositiveInt(req.params.id, 'userId');
   const row = await prisma.user.findUnique({ where: { id }, include: { role: true } });
-  if (!row) throw Errors.notFound('المستخدم غير موجود');
+  if (!row) throw Errors.notFound('Ø§Ù„Ù…Ø³ØªØ®Ø¯Ù… ØºÙŠØ± Ù…ÙˆØ¬ÙˆØ¯');
   ok(res, row.role.permissions ?? {});
 });
 
 router.put('/users/:id/permissions', async (req: Request, res: Response) => {
   const id = parsePositiveInt(req.params.id, 'userId');
   const user = await prisma.user.findUnique({ where: { id } });
-  if (!user) throw Errors.notFound('المستخدم غير موجود');
+  if (!user) throw Errors.notFound('Ø§Ù„Ù…Ø³ØªØ®Ø¯Ù… ØºÙŠØ± Ù…ÙˆØ¬ÙˆØ¯');
   const role = await prisma.role.findUnique({ where: { id: user.roleId } });
-  if (!role) throw Errors.notFound('الدور غير موجود');
+  if (!role) throw Errors.notFound('Ø§Ù„Ø¯ÙˆØ± ØºÙŠØ± Ù…ÙˆØ¬ÙˆØ¯');
   const row = await prisma.role.update({ where: { id: role.id }, data: { permissions: req.body ?? {} } });
   ok(res, row.permissions ?? {});
 });
@@ -1451,7 +1457,7 @@ router.put('/users/:id/permissions', async (req: Request, res: Response) => {
 router.get('/roles/:id/permissions', async (req: Request, res: Response) => {
   const id = parsePositiveInt(req.params.id, 'roleId');
   const row = await prisma.role.findUnique({ where: { id } });
-  if (!row) throw Errors.notFound('الدور غير موجود');
+  if (!row) throw Errors.notFound('Ø§Ù„Ø¯ÙˆØ± ØºÙŠØ± Ù…ÙˆØ¬ÙˆØ¯');
   ok(res, row.permissions ?? {});
 });
 
@@ -1517,7 +1523,7 @@ router.get('/custom-reports', async (_req: Request, res: Response) => {
 router.get('/custom-reports/:id/run', async (req: Request, res: Response) => {
   const id = parsePositiveInt(req.params.id, 'reportId');
   const row = await prisma.savedReport.findUnique({ where: { id } });
-  if (!row) throw Errors.notFound('التقرير غير موجود');
+  if (!row) throw Errors.notFound('Ø§Ù„ØªÙ‚Ø±ÙŠØ± ØºÙŠØ± Ù…ÙˆØ¬ÙˆØ¯');
   ok(res, { report: row, result: [], executedAt: new Date().toISOString() });
 });
 
@@ -1620,7 +1626,7 @@ router.put('/tax-categories/:id', async (req: Request, res: Response) => {
   const row = await prisma.integrationSetting.findUnique({ where: { key: 'tax-categories' } });
   const categories = Array.isArray((row?.settings as any)?.categories) ? [...(row?.settings as any).categories] : [];
   const idx = categories.findIndex((c: any) => Number(c.id) === id);
-  if (idx < 0) throw Errors.notFound('فئة الضريبة غير موجودة');
+  if (idx < 0) throw Errors.notFound('ÙØ¦Ø© Ø§Ù„Ø¶Ø±ÙŠØ¨Ø© ØºÙŠØ± Ù…ÙˆØ¬ÙˆØ¯Ø©');
   categories[idx] = { ...categories[idx], ...req.body, id };
   await prisma.integrationSetting.upsert({
     where: { key: 'tax-categories' },
@@ -1765,7 +1771,7 @@ router.post('/currency/revaluate', async (req: Request, res: Response) => {
       orderBy: [{ fiscalYearId: 'desc' }, { number: 'desc' }]
     });
     if (!period || period.fiscalYear.status !== 'OPEN') {
-      throw Errors.business('لا توجد فترة محاسبية مفتوحة لتقييم فروقات العملة');
+      throw Errors.business('Ù„Ø§ ØªÙˆØ¬Ø¯ ÙØªØ±Ø© Ù…Ø­Ø§Ø³Ø¨ÙŠØ© Ù…ÙØªÙˆØ­Ø© Ù„ØªÙ‚ÙŠÙŠÙ… ÙØ±ÙˆÙ‚Ø§Øª Ø§Ù„Ø¹Ù…Ù„Ø©');
     }
 
     const postingAccounts = await resolvePostingAccounts(tx as any);
@@ -1843,11 +1849,11 @@ router.post('/currency/revaluate', async (req: Request, res: Response) => {
       };
 
       if (gain > 0) {
-        addLine(glAccountId, gain, 0, `فرق تقييم عملة ${currencyCode} (${bank.name})`);
-        addLine(gainAccountId, 0, gain, `ربح فرق تقييم عملة ${currencyCode}`);
+        addLine(glAccountId, gain, 0, `ÙØ±Ù‚ ØªÙ‚ÙŠÙŠÙ… Ø¹Ù…Ù„Ø© ${currencyCode} (${bank.name})`);
+        addLine(gainAccountId, 0, gain, `Ø±Ø¨Ø­ ÙØ±Ù‚ ØªÙ‚ÙŠÙŠÙ… Ø¹Ù…Ù„Ø© ${currencyCode}`);
       } else if (loss > 0) {
-        addLine(lossAccountId, loss, 0, `خسارة فرق تقييم عملة ${currencyCode}`);
-        addLine(glAccountId, 0, loss, `فرق تقييم عملة ${currencyCode} (${bank.name})`);
+        addLine(lossAccountId, loss, 0, `Ø®Ø³Ø§Ø±Ø© ÙØ±Ù‚ ØªÙ‚ÙŠÙŠÙ… Ø¹Ù…Ù„Ø© ${currencyCode}`);
+        addLine(glAccountId, 0, loss, `ÙØ±Ù‚ ØªÙ‚ÙŠÙŠÙ… Ø¹Ù…Ù„Ø© ${currencyCode} (${bank.name})`);
       }
 
       details.push({
@@ -1886,7 +1892,7 @@ router.post('/currency/revaluate', async (req: Request, res: Response) => {
     const totalDebit = roundAmount(lines.reduce((sum, l) => sum + l.debit, 0));
     const totalCredit = roundAmount(lines.reduce((sum, l) => sum + l.credit, 0));
     if (Math.abs(totalDebit - totalCredit) > 0.01) {
-      throw Errors.business('تعذر ترحيل قيد تقييم العملة لعدم التوازن');
+      throw Errors.business('ØªØ¹Ø°Ø± ØªØ±Ø­ÙŠÙ„ Ù‚ÙŠØ¯ ØªÙ‚ÙŠÙŠÙ… Ø§Ù„Ø¹Ù…Ù„Ø© Ù„Ø¹Ø¯Ù… Ø§Ù„ØªÙˆØ§Ø²Ù†');
     }
 
     const year = asOfDate.getUTCFullYear();
@@ -1898,7 +1904,7 @@ router.post('/currency/revaluate', async (req: Request, res: Response) => {
         entryNumber,
         date: asOfDate,
         periodId: period.id,
-        description: `قيد فروقات العملة بتاريخ ${asOfDateKey}`,
+        description: `Ù‚ÙŠØ¯ ÙØ±ÙˆÙ‚Ø§Øª Ø§Ù„Ø¹Ù…Ù„Ø© Ø¨ØªØ§Ø±ÙŠØ® ${asOfDateKey}`,
         reference,
         source: 'MANUAL',
         status: 'POSTED',
@@ -1983,7 +1989,7 @@ router.post('/auth/enable-mfa', async (req: any, res: Response) => {
 router.post('/auth/verify-mfa', async (req: any, res: Response) => {
   const userId = Number(req.user.id);
   const token = String(req.body?.token ?? '');
-  if (token.length < 4) throw Errors.validation('رمز MFA غير صالح');
+  if (token.length < 4) throw Errors.validation('Ø±Ù…Ø² MFA ØºÙŠØ± ØµØ§Ù„Ø­');
   const row = await prisma.userMfaSetting.upsert({
     where: { userId },
     update: { verifiedAt: new Date(), isEnabled: true },
@@ -2021,7 +2027,7 @@ router.post('/profile/mfa/enable', async (req: any, res: Response) => {
 router.post('/profile/mfa/verify', async (req: any, res: Response) => {
   const userId = Number(req.user.id);
   const token = String(req.body?.token ?? '');
-  if (token.length < 4) throw Errors.validation('رمز MFA غير صالح');
+  if (token.length < 4) throw Errors.validation('Ø±Ù…Ø² MFA ØºÙŠØ± ØµØ§Ù„Ø­');
   const row = await prisma.userMfaSetting.upsert({
     where: { userId },
     update: { verifiedAt: new Date(), isEnabled: true },
@@ -2145,7 +2151,7 @@ router.get('/bank-reconciliations', async (_req: Request, res: Response) => {
 router.get('/bank-reconciliations/:id', async (req: Request, res: Response) => {
   const id = parsePositiveInt(req.params.id, 'reconciliationId');
   const row = await prisma.integrationSetting.findUnique({ where: { key: bankReconKey(id) } });
-  if (!row) throw Errors.notFound('التسوية غير موجودة');
+  if (!row) throw Errors.notFound('Ø§Ù„ØªØ³ÙˆÙŠØ© ØºÙŠØ± Ù…ÙˆØ¬ÙˆØ¯Ø©');
   ok(res, { id, status: row.status ?? 'DRAFT', settings: row.settings ?? {} });
 });
 
@@ -2187,7 +2193,7 @@ router.post('/bank-reconciliations', async (req: Request, res: Response) => {
 
   if (!selectedId) {
     await prisma.integrationSetting.delete({ where: { id: created.id } });
-    throw Errors.conflict('تعذر إنشاء تسوية بنكية بسبب تعارض معرف التسوية');
+    throw Errors.conflict('ØªØ¹Ø°Ø± Ø¥Ù†Ø´Ø§Ø¡ ØªØ³ÙˆÙŠØ© Ø¨Ù†ÙƒÙŠØ© Ø¨Ø³Ø¨Ø¨ ØªØ¹Ø§Ø±Ø¶ Ù…Ø¹Ø±Ù Ø§Ù„ØªØ³ÙˆÙŠØ©');
   }
 
   ok(res, { id: selectedId, row }, undefined, 201);
@@ -2577,7 +2583,7 @@ router.post('/tickets/:id/assign', async (req: Request, res: Response) => {
 router.patch('/tickets/:id/status', async (req: Request, res: Response) => {
   const id = parsePositiveInt(req.params.id, 'ticketId');
   const status = String(req.body?.status ?? '').trim();
-  if (!status) throw Errors.validation('status مطلوب');
+  if (!status) throw Errors.validation('status Ù…Ø·Ù„ÙˆØ¨');
   ok(res, await prisma.supportTicket.update({ where: { id }, data: { status } }));
 });
 
@@ -2644,7 +2650,7 @@ router.get('/payroll/:id', async (req: Request, res: Response) => {
 router.post('/payroll/generate', async (req: Request, res: Response) => {
   const year = Number(req.body?.year);
   const month = Number(req.body?.month);
-  if (!year || !month) throw Errors.validation('year/month مطلوبة');
+  if (!year || !month) throw Errors.validation('year/month Ù…Ø·Ù„ÙˆØ¨Ø©');
   const code = `PAY-${year}-${String(month).padStart(2, '0')}-${Date.now()}`;
   const employees = await prisma.employee.findMany({ where: { status: 'ACTIVE' } });
   const grossTotal = employees.reduce((s, e) => s + Number(e.baseSalary) + Number(e.allowances), 0);
@@ -2679,10 +2685,10 @@ router.post('/payroll/:id/post', async (req: Request, res: Response) => {
   if (!run) throw Errors.notFound('???? ??????? ??? ?????');
   if (run.status !== 'APPROVED') throw Errors.business('???? ????? ???? ????? ????? ???');
   const payrollLines = await prisma.payrollLine.findMany({ where: { payrollRunId: id } });
-  if (!payrollLines.length) throw Errors.business('لا يمكن ترحيل كشف رواتب بدون موظفين');
+  if (!payrollLines.length) throw Errors.business('Ù„Ø§ ÙŠÙ…ÙƒÙ† ØªØ±Ø­ÙŠÙ„ ÙƒØ´Ù Ø±ÙˆØ§ØªØ¨ Ø¨Ø¯ÙˆÙ† Ù…ÙˆØ¸ÙÙŠÙ†');
 
   const netTotal = roundAmount(payrollLines.reduce((sum, line) => sum + Number(line.netSalary ?? 0), 0));
-  if (netTotal <= 0) throw Errors.business('صافي كشف الرواتب يجب أن يكون أكبر من صفر');
+  if (netTotal <= 0) throw Errors.business('ØµØ§ÙÙŠ ÙƒØ´Ù Ø§Ù„Ø±ÙˆØ§ØªØ¨ ÙŠØ¬Ø¨ Ø£Ù† ÙŠÙƒÙˆÙ† Ø£ÙƒØ¨Ø± Ù…Ù† ØµÙØ±');
 
   const userId = Number((req as any).user.id);
   const reference = `PAYROLL-RUN-${id}`;
@@ -2693,14 +2699,14 @@ router.post('/payroll/:id/post', async (req: Request, res: Response) => {
 
   let journalEntryId = existingEntry?.id ?? null;
   if (existingEntry && existingEntry.status !== 'POSTED') {
-    throw Errors.business('يوجد قيد رواتب سابق غير مرحل لنفس الكشف');
+    throw Errors.business('ÙŠÙˆØ¬Ø¯ Ù‚ÙŠØ¯ Ø±ÙˆØ§ØªØ¨ Ø³Ø§Ø¨Ù‚ ØºÙŠØ± Ù…Ø±Ø­Ù„ Ù„Ù†ÙØ³ Ø§Ù„ÙƒØ´Ù');
   }
 
   if (!existingEntry) {
     const postingAccounts = await resolvePostingAccounts(prisma as any);
     const postingDate = parseOptionalDate(req.body?.postingDate, new Date());
     const monthLabel = String(run.month).padStart(2, '0');
-    const description = String(req.body?.description ?? `ترحيل كشف رواتب ${run.year}-${monthLabel}`).trim();
+    const description = String(req.body?.description ?? `ØªØ±Ø­ÙŠÙ„ ÙƒØ´Ù Ø±ÙˆØ§ØªØ¨ ${run.year}-${monthLabel}`).trim();
 
     const createdEntry = await journalService.createEntry(
       {
@@ -2713,13 +2719,13 @@ router.post('/payroll/:id/post', async (req: Request, res: Response) => {
             accountId: postingAccounts.purchaseExpenseAccountId,
             debit: netTotal,
             credit: 0,
-            description: `مصروف رواتب ${run.year}-${monthLabel}`
+            description: `Ù…ØµØ±ÙˆÙ Ø±ÙˆØ§ØªØ¨ ${run.year}-${monthLabel}`
           },
           {
             accountId: postingAccounts.payableAccountId,
             debit: 0,
             credit: netTotal,
-            description: `رواتب مستحقة ${run.year}-${monthLabel}`
+            description: `Ø±ÙˆØ§ØªØ¨ Ù…Ø³ØªØ­Ù‚Ø© ${run.year}-${monthLabel}`
           }
         ]
       },
@@ -2797,9 +2803,9 @@ router.post('/milestones/:id/complete', async (req: Request, res: Response) => {
 });
 
 const helpArticles = [
-  { id: 1, title: 'البدء السريع', category: 'onboarding', content: 'دليل البدء السريع للنظام.' },
-  { id: 2, title: 'إصدار فاتورة', category: 'sales', content: 'خطوات إصدار فاتورة مبيعات.' },
-  { id: 3, title: 'إقفال الفترة', category: 'accounting', content: 'طريقة إقفال الفترة المحاسبية.' }
+  { id: 1, title: 'Ø§Ù„Ø¨Ø¯Ø¡ Ø§Ù„Ø³Ø±ÙŠØ¹', category: 'onboarding', content: 'Ø¯Ù„ÙŠÙ„ Ø§Ù„Ø¨Ø¯Ø¡ Ø§Ù„Ø³Ø±ÙŠØ¹ Ù„Ù„Ù†Ø¸Ø§Ù….' },
+  { id: 2, title: 'Ø¥ØµØ¯Ø§Ø± ÙØ§ØªÙˆØ±Ø©', category: 'sales', content: 'Ø®Ø·ÙˆØ§Øª Ø¥ØµØ¯Ø§Ø± ÙØ§ØªÙˆØ±Ø© Ù…Ø¨ÙŠØ¹Ø§Øª.' },
+  { id: 3, title: 'Ø¥Ù‚ÙØ§Ù„ Ø§Ù„ÙØªØ±Ø©', category: 'accounting', content: 'Ø·Ø±ÙŠÙ‚Ø© Ø¥Ù‚ÙØ§Ù„ Ø§Ù„ÙØªØ±Ø© Ø§Ù„Ù…Ø­Ø§Ø³Ø¨ÙŠØ©.' }
 ];
 
 router.get('/help-center/articles', async (_req: Request, res: Response) => {
@@ -2821,11 +2827,11 @@ router.get('/knowledge-base/search', async (req: Request, res: Response) => {
 });
 
 router.post('/assistant/query', async (req: Request, res: Response) => {
-  ok(res, { answer: `تم استلام سؤالك: ${String(req.body?.query ?? '')}`, suggestions: ['افتح شاشة القيود', 'راجع تقرير المبيعات'] });
+  ok(res, { answer: `ØªÙ… Ø§Ø³ØªÙ„Ø§Ù… Ø³Ø¤Ø§Ù„Ùƒ: ${String(req.body?.query ?? '')}`, suggestions: ['Ø§ÙØªØ­ Ø´Ø§Ø´Ø© Ø§Ù„Ù‚ÙŠÙˆØ¯', 'Ø±Ø§Ø¬Ø¹ ØªÙ‚Ø±ÙŠØ± Ø§Ù„Ù…Ø¨ÙŠØ¹Ø§Øª'] });
 });
 
 router.get('/assistant/suggest', async (_req: Request, res: Response) => {
-  ok(res, ['إصدار فاتورة جديدة', 'تشغيل ميزان المراجعة', 'مراجعة المهام المعلقة']);
+  ok(res, ['Ø¥ØµØ¯Ø§Ø± ÙØ§ØªÙˆØ±Ø© Ø¬Ø¯ÙŠØ¯Ø©', 'ØªØ´ØºÙŠÙ„ Ù…ÙŠØ²Ø§Ù† Ø§Ù„Ù…Ø±Ø§Ø¬Ø¹Ø©', 'Ù…Ø±Ø§Ø¬Ø¹Ø© Ø§Ù„Ù…Ù‡Ø§Ù… Ø§Ù„Ù…Ø¹Ù„Ù‚Ø©']);
 });
 
 router.get('/setup-wizard/steps', async (_req: Request, res: Response) => {
