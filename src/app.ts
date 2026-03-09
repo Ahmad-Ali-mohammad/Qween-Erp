@@ -12,7 +12,11 @@ import apiRoutes from './routes';
 import { ok } from './utils/response';
 import { errorMiddleware } from './middleware/error';
 import { notFound } from './middleware/not-found';
+import { getPrintingQueueCapabilities } from './modules/printing/queue';
+import { getSyncQueueCapabilities } from './modules/sync/queue';
 import { getMetricsContentType, metricsMiddleware, renderMetrics } from './observability/metrics';
+import { getSentryCapabilities } from './observability/sentry';
+import { getFileStorageCapabilities } from './services/file-storage';
 import { CENTRAL_SYSTEMS } from './modules/central/catalog';
 
 export const app = express();
@@ -66,7 +70,8 @@ const limiter = rateLimit({
         message: `Too many requests. Retry after ${retryAfterSeconds}s`
       }
     });
-  }
+  },
+  skip: (req) => ['/health', '/v1/health', '/metrics', '/v1/metrics'].includes(req.path)
 });
 app.use('/api', limiter);
 
@@ -78,7 +83,17 @@ const healthHandler = (_req: express.Request, res: express.Response) => {
     uptime: process.uptime(),
     timezone: env.appTimezone,
     locale: env.appLocale,
-    baseCurrency: env.baseCurrency
+    baseCurrency: env.baseCurrency,
+    observability: {
+      metricsEnabled: env.metricsEnabled,
+      metricsProtected: Boolean(env.metricsToken),
+      sentry: getSentryCapabilities(),
+      queue: {
+        sync: getSyncQueueCapabilities(),
+        printing: getPrintingQueueCapabilities()
+      },
+      storage: getFileStorageCapabilities()
+    }
   });
 };
 
