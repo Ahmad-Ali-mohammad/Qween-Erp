@@ -1,4 +1,4 @@
-﻿import { prisma } from '../../config/database';
+import { prisma } from '../../config/database';
 import { parseDateOrThrow } from '../../utils/date';
 import { Errors } from '../../utils/response';
 import { buildSequentialNumberFromLatest } from '../../utils/id-generator';
@@ -16,7 +16,7 @@ async function generateNumber(tx: any, type: 'SALES' | 'PURCHASE', docDate: Date
       number: { startsWith: `${prefix}-${year}-` }
     },
     select: { number: true },
-    orderBy: { id: 'desc' }
+    orderBy: { number: 'desc' }
   });
   return buildSequentialNumberFromLatest(prefix, latest?.number, year);
 }

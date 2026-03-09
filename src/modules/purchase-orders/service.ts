@@ -162,6 +162,7 @@ export async function convertPurchaseOrder(id: number, userId: number) {
     const lines = await tx.purchaseOrderLine.findMany({ where: { purchaseOrderId: id }, orderBy: { id: 'asc' } });
     if (!lines.length) throw Errors.business('لا يمكن تحويل طلب شراء بدون بنود');
 
+    await tx.$executeRawUnsafe('LOCK TABLE "Invoice" IN EXCLUSIVE MODE');
     const year = new Date().getUTCFullYear();
     const latestInvoice = await tx.invoice.findFirst({
       where: {
@@ -169,7 +170,7 @@ export async function convertPurchaseOrder(id: number, userId: number) {
         date: { gte: new Date(Date.UTC(year, 0, 1)), lt: new Date(Date.UTC(year + 1, 0, 1)) }
       },
       select: { number: true },
-      orderBy: { id: 'desc' }
+      orderBy: { number: 'desc' }
     });
     const invoiceNumber = buildSequentialNumberFromLatest('PINV', latestInvoice?.number, year);
 
