@@ -1,15 +1,15 @@
 ﻿import { prisma } from '../../config/database';
 import { parseDateOrThrow } from '../../utils/date';
-import { buildSequentialNumberFromLatest } from '../../utils/id-generator';
 import { Errors } from '../../utils/response';
-import { reserveNextSequenceInDb } from '../numbering/service';
+import { buildSequentialNumberFromLatest } from '../../utils/id-generator';
 import { applyLedgerLines } from '../shared/ledger';
 import { resolvePostingAccounts } from '../shared/posting-accounts';
 
-async function generateNumber(type: 'SALES' | 'PURCHASE', docDate: Date): Promise<string> {
+async function generateNumber(tx: any, type: 'SALES' | 'PURCHASE', docDate: Date): Promise<string> {
   const year = docDate.getUTCFullYear();
   const prefix = type === 'SALES' ? 'INV' : 'PINV';
-  const latest = await prisma.invoice.findFirst({
+  await tx.$executeRawUnsafe('LOCK TABLE "Invoice" IN EXCLUSIVE MODE');
+  const latest = await tx.invoice.findFirst({
     where: {
       type,
       date: { gte: new Date(Date.UTC(year, 0, 1)), lt: new Date(Date.UTC(year + 1, 0, 1)) },
@@ -145,13 +145,11 @@ export async function createInvoice(data: any, userId: number) {
   const calc = calcLines(data.lines);
 
   return prisma.$transaction(async (tx) => {
-    const sequence = await reserveNextSequenceInDb(tx, {
-      documentType: data.type === 'SALES' ? 'INV' : 'PINV',
-      date: invoiceDate
-    });
+    const number = await generateNumber(tx, data.type, invoiceDate);
+
     const invoice = await tx.invoice.create({
       data: {
-        number: sequence.number,
+        number,
         type: data.type,
         customerId: data.customerId,
         supplierId: data.supplierId,
@@ -281,6 +279,8 @@ export async function listInvoices(query: any) {
   if (query.status) where.status = query.status;
   if (query.customerId) where.customerId = Number(query.customerId);
   if (query.supplierId) where.supplierId = Number(query.supplierId);
+  if (query.projectId) where.projectId = Number(query.projectId);
+  else if (Array.isArray(query.projectIds) && query.projectIds.length) where.projectId = { in: query.projectIds.map(Number) };
 
   const [rows, total] = await Promise.all([
     prisma.invoice.findMany({
