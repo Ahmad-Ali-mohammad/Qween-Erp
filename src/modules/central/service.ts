@@ -3,8 +3,11 @@ import { existsSync } from 'fs';
 import path from 'path';
 import { env } from '../../config/env';
 import { getMetricsContentType } from '../../observability/metrics';
+import { getSentryCapabilities } from '../../observability/sentry';
+import { getFileStorageCapabilities } from '../../services/file-storage';
 import type { AuthUser } from '../../types/auth';
 import { CENTRAL_GROUP_ORDER, CENTRAL_SYSTEMS } from './catalog';
+import { getPrintingQueueCapabilities } from '../printing/queue';
 import { getSyncQueueCapabilities } from '../sync/queue';
 
 function hasSystemAccess(user: AuthUser | undefined, permissions: string[]) {
@@ -43,9 +46,12 @@ export function getCentralHealth() {
     environment: env.nodeEnv,
     timezone: env.appTimezone,
     baseCurrency: env.baseCurrency,
+    storage: getFileStorageCapabilities(),
+    sentry: getSentryCapabilities(),
     metricsContentType: getMetricsContentType(),
     queue: {
-      sync: getSyncQueueCapabilities()
+      sync: getSyncQueueCapabilities(),
+      printing: getPrintingQueueCapabilities()
     },
     systems: CENTRAL_SYSTEMS.map((system) => ({
       key: system.key,
