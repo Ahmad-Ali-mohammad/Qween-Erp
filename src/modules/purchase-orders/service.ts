@@ -1,6 +1,6 @@
 import { prisma } from '../../config/database';
 import { parseDateOrThrow } from '../../utils/date';
-import { buildSequentialNumber, buildSequentialNumberFromLatest } from '../../utils/id-generator';
+import { buildSequentialNumber } from '../../utils/id-generator';
 import { Errors } from '../../utils/response';
 
 function calcLines(lines: any[]) {
@@ -162,36 +162,36 @@ export async function convertPurchaseOrder(id: number, userId: number) {
     const lines = await tx.purchaseOrderLine.findMany({ where: { purchaseOrderId: id }, orderBy: { id: 'asc' } });
     if (!lines.length) throw Errors.business('لا يمكن تحويل طلب شراء بدون بنود');
 
+    const invoiceDate = new Date();
+    const year = invoiceDate.getUTCFullYear();
+    const month = String(invoiceDate.getUTCMonth() + 1).padStart(2, '0');
+    const sequencePrefix = `PINV-${year}-${month}-`;
+
     await tx.$executeRawUnsafe('LOCK TABLE "Invoice" IN EXCLUSIVE MODE');
-    const year = new Date().getUTCFullYear();
-    const sequencePrefix = `PINV-${year}-`;
     const existingInvoices = await tx.invoice.findMany({
       where: {
         type: 'PURCHASE',
-        date: { gte: new Date(Date.UTC(year, 0, 1)), lt: new Date(Date.UTC(year + 1, 0, 1)) },
         number: { startsWith: sequencePrefix }
       },
       select: { number: true }
     });
 
-    let latestInvoiceNumber: string | undefined;
     let maxSequence = 0;
     for (const row of existingInvoices) {
       const sequence = Number.parseInt(String(row.number).slice(sequencePrefix.length), 10);
-      if (Number.isFinite(sequence) && sequence > maxSequence) {
+      if (Number.isInteger(sequence) && sequence > maxSequence) {
         maxSequence = sequence;
-        latestInvoiceNumber = row.number;
       }
     }
 
-    const invoiceNumber = buildSequentialNumberFromLatest('PINV', latestInvoiceNumber, year);
+    const invoiceNumber = `${sequencePrefix}${String(maxSequence + 1).padStart(5, '0')}`;
 
     const taxableAmount = Number(current.subtotal) - Number(current.discount);
     const invoice = await tx.invoice.create({
       data: {
         number: invoiceNumber,
         type: 'PURCHASE',
-        date: new Date(),
+        date: invoiceDate,
         dueDate: current.expectedDate,
         supplierId: current.supplierId,
         subtotal: current.subtotal,
