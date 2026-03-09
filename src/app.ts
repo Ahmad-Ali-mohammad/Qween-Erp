@@ -11,6 +11,7 @@ import apiRoutes from './routes';
 import { ok } from './utils/response';
 import { errorMiddleware } from './middleware/error';
 import { notFound } from './middleware/not-found';
+import { getMetricsContentType, metricsMiddleware, renderMetrics } from './observability/metrics';
 
 export const app = express();
 
@@ -20,6 +21,7 @@ app.use(cookieParser());
 app.use(express.json({ limit: '5mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(morgan(env.nodeEnv === 'production' ? 'combined' : 'dev'));
+app.use(metricsMiddleware);
 
 const limiter = rateLimit({
   windowMs: env.rateLimitWindow * 60 * 1000,
@@ -59,6 +61,49 @@ const healthHandler = (_req: express.Request, res: express.Response) => {
 
 app.get('/api/health', healthHandler);
 app.get('/api/v1/health', healthHandler);
+
+const metricsHandler = async (req: express.Request, res: express.Response) => {
+  if (!env.metricsEnabled) {
+    res.status(404).json({
+      success: false,
+      status: {
+        code: 'NOT_FOUND',
+        message: 'Metrics endpoint is disabled'
+      },
+      error: {
+        code: 'NOT_FOUND',
+        message: 'Metrics endpoint is disabled'
+      }
+    });
+    return;
+  }
+
+  if (env.metricsToken) {
+    const bearerToken = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+    const headerToken = String(req.headers['x-metrics-token'] || '');
+
+    if (bearerToken !== env.metricsToken && headerToken !== env.metricsToken) {
+      res.status(401).json({
+        success: false,
+        status: {
+          code: 'UNAUTHORIZED',
+          message: 'Metrics token is required'
+        },
+        error: {
+          code: 'UNAUTHORIZED',
+          message: 'Metrics token is required'
+        }
+      });
+      return;
+    }
+  }
+
+  res.setHeader('Content-Type', getMetricsContentType());
+  res.send(await renderMetrics());
+};
+
+app.get('/api/metrics', metricsHandler);
+app.get('/api/v1/metrics', metricsHandler);
 
 app.use('/api/v1', apiRoutes);
 app.use('/api', apiRoutes);

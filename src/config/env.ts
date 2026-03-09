@@ -22,6 +22,8 @@ export const env = {
   rateLimitMax: Number(process.env.RATE_LIMIT_MAX ?? 150),
   logLevel: process.env.LOG_LEVEL ?? 'info',
   logFilePath: process.env.LOG_FILE_PATH ?? './logs',
+  metricsEnabled: process.env.METRICS_ENABLED !== 'false',
+  metricsToken: process.env.METRICS_TOKEN ?? '',
   appTimezone: process.env.APP_TIMEZONE ?? 'Asia/Kuwait',
   appLocale: process.env.APP_LOCALE ?? 'ar-KW',
   baseCurrency: process.env.BASE_CURRENCY ?? 'KWD'
