@@ -24,6 +24,11 @@ export const env = {
   logFilePath: process.env.LOG_FILE_PATH ?? './logs',
   metricsEnabled: process.env.METRICS_ENABLED !== 'false',
   metricsToken: process.env.METRICS_TOKEN ?? '',
+  redisUrl: process.env.REDIS_URL ?? '',
+  bullmqEnabled: process.env.BULLMQ_ENABLED === 'true' || process.env.ENABLE_QUEUE === 'true',
+  syncQueueName: process.env.SYNC_QUEUE_NAME ?? 'sync-batches',
+  syncQueueConcurrency: Number(process.env.SYNC_QUEUE_CONCURRENCY ?? 2),
+  syncQueueAttempts: Number(process.env.SYNC_QUEUE_ATTEMPTS ?? 3),
   appTimezone: process.env.APP_TIMEZONE ?? 'Asia/Kuwait',
   appLocale: process.env.APP_LOCALE ?? 'ar-KW',
   baseCurrency: process.env.BASE_CURRENCY ?? 'KWD'

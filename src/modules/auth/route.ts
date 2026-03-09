@@ -1,11 +1,20 @@
 import { Router } from 'express';
 import { validateBody } from '../../middleware/validate';
 import { authenticate } from '../../middleware/auth';
-import { forgotPasswordSchema, loginSchema, refreshSchema, resetPasswordSchema } from './dto';
+import { forgotPasswordSchema, loginSchema, refreshSchema, registerSchema, resetPasswordSchema } from './dto';
 import * as service from './service';
 import { ok } from '../../utils/response';
 
 const router = Router();
+
+router.post('/register', validateBody(registerSchema), async (req, res, next) => {
+  try {
+    const result = await service.register(req.body);
+    ok(res, result, undefined, 201);
+  } catch (error) {
+    next(error);
+  }
+});
 
 router.post('/login', validateBody(loginSchema), async (req, res, next) => {
   try {

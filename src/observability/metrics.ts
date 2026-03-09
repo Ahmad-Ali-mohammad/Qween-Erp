@@ -28,6 +28,20 @@ const httpRequestDurationSeconds = new Histogram({
   registers: [metricsRegistry]
 });
 
+const syncBatchesTotal = new Counter({
+  name: `${METRIC_PREFIX}sync_batches_total`,
+  help: 'Total sync batches by execution mode and outcome',
+  labelNames: ['mode', 'result'] as const,
+  registers: [metricsRegistry]
+});
+
+const syncQueueJobsTotal = new Counter({
+  name: `${METRIC_PREFIX}sync_queue_jobs_total`,
+  help: 'Total sync queue jobs by state',
+  labelNames: ['state'] as const,
+  registers: [metricsRegistry]
+});
+
 function normalizeRoute(pathname: string): string {
   return pathname
     .replace(/\/\d+(?=\/|$)/g, '/:id')
@@ -63,6 +77,16 @@ export function metricsMiddleware(req: Request, res: Response, next: NextFunctio
   });
 
   next();
+}
+
+export function recordSyncBatch(mode: 'inline' | 'queued' | 'fallback', result: 'applied' | 'accepted' | 'failed'): void {
+  if (!env.metricsEnabled) return;
+  syncBatchesTotal.inc({ mode, result });
+}
+
+export function recordSyncQueueJobState(state: 'completed' | 'failed'): void {
+  if (!env.metricsEnabled) return;
+  syncQueueJobsTotal.inc({ state });
 }
 
 export async function renderMetrics(): Promise<string> {
