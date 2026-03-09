@@ -9,16 +9,27 @@ async function generateNumber(tx: any, type: 'SALES' | 'PURCHASE', docDate: Date
   const year = docDate.getUTCFullYear();
   const prefix = type === 'SALES' ? 'INV' : 'PINV';
   await tx.$executeRawUnsafe('LOCK TABLE "Invoice" IN EXCLUSIVE MODE');
-  const latest = await tx.invoice.findFirst({
+  const sequencePrefix = `${prefix}-${year}-`;
+  const existing = await tx.invoice.findMany({
     where: {
       type,
       date: { gte: new Date(Date.UTC(year, 0, 1)), lt: new Date(Date.UTC(year + 1, 0, 1)) },
-      number: { startsWith: `${prefix}-${year}-` }
+      number: { startsWith: sequencePrefix }
     },
-    select: { number: true },
-    orderBy: { number: 'desc' }
+    select: { number: true }
   });
-  return buildSequentialNumberFromLatest(prefix, latest?.number, year);
+
+  let latestNumber: string | undefined;
+  let maxSequence = 0;
+  for (const row of existing) {
+    const sequence = Number.parseInt(String(row.number).slice(sequencePrefix.length), 10);
+    if (Number.isFinite(sequence) && sequence > maxSequence) {
+      maxSequence = sequence;
+      latestNumber = row.number;
+    }
+  }
+
+  return buildSequentialNumberFromLatest(prefix, latestNumber, year);
 }
 
 function calcLines(lines: any[]) {

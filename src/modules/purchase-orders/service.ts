@@ -164,15 +164,27 @@ export async function convertPurchaseOrder(id: number, userId: number) {
 
     await tx.$executeRawUnsafe('LOCK TABLE "Invoice" IN EXCLUSIVE MODE');
     const year = new Date().getUTCFullYear();
-    const latestInvoice = await tx.invoice.findFirst({
+    const sequencePrefix = `PINV-${year}-`;
+    const existingInvoices = await tx.invoice.findMany({
       where: {
         type: 'PURCHASE',
-        date: { gte: new Date(Date.UTC(year, 0, 1)), lt: new Date(Date.UTC(year + 1, 0, 1)) }
+        date: { gte: new Date(Date.UTC(year, 0, 1)), lt: new Date(Date.UTC(year + 1, 0, 1)) },
+        number: { startsWith: sequencePrefix }
       },
-      select: { number: true },
-      orderBy: { number: 'desc' }
+      select: { number: true }
     });
-    const invoiceNumber = buildSequentialNumberFromLatest('PINV', latestInvoice?.number, year);
+
+    let latestInvoiceNumber: string | undefined;
+    let maxSequence = 0;
+    for (const row of existingInvoices) {
+      const sequence = Number.parseInt(String(row.number).slice(sequencePrefix.length), 10);
+      if (Number.isFinite(sequence) && sequence > maxSequence) {
+        maxSequence = sequence;
+        latestInvoiceNumber = row.number;
+      }
+    }
+
+    const invoiceNumber = buildSequentialNumberFromLatest('PINV', latestInvoiceNumber, year);
 
     const taxableAmount = Number(current.subtotal) - Number(current.discount);
     const invoice = await tx.invoice.create({
