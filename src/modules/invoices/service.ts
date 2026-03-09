@@ -2,6 +2,7 @@
 import { parseDateOrThrow } from '../../utils/date';
 import { buildSequentialNumberFromLatest } from '../../utils/id-generator';
 import { Errors } from '../../utils/response';
+import { reserveNextSequenceInDb } from '../numbering/service';
 import { applyLedgerLines } from '../shared/ledger';
 import { resolvePostingAccounts } from '../shared/posting-accounts';
 
@@ -142,12 +143,15 @@ export async function createInvoice(data: any, userId: number) {
 
   const invoiceDate = parseDateOrThrow(data.date);
   const calc = calcLines(data.lines);
-  const number = await generateNumber(data.type, invoiceDate);
 
   return prisma.$transaction(async (tx) => {
+    const sequence = await reserveNextSequenceInDb(tx, {
+      documentType: data.type === 'SALES' ? 'INV' : 'PINV',
+      date: invoiceDate
+    });
     const invoice = await tx.invoice.create({
       data: {
-        number,
+        number: sequence.number,
         type: data.type,
         customerId: data.customerId,
         supplierId: data.supplierId,

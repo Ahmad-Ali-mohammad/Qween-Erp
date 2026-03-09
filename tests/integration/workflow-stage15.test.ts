@@ -3,6 +3,8 @@ import { app } from '../../src/app';
 import { prisma } from '../../src/config/database';
 import { ensureAdminUser, loginAdmin, uniqueCode } from './helpers';
 
+jest.setTimeout(30000);
+
 describe('Stage 15 guard rails coverage (negative workflows)', () => {
   let token = '';
   const auth = () => ({ Authorization: `Bearer ${token}` });

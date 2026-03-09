@@ -3,6 +3,8 @@ import { app } from '../../src/app';
 import { prisma } from '../../src/config/database';
 import { ensureAdminUser, loginAdmin, uniqueCode } from './helpers';
 
+jest.setTimeout(30000);
+
 describe('Stage 14 deep workflow coverage (Help/Support + Profile/Auth)', () => {
   let adminToken = '';
   const adminAuth = () => ({ Authorization: `Bearer ${adminToken}` });

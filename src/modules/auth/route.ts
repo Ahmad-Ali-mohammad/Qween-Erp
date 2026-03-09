@@ -16,6 +16,24 @@ router.post('/login', validateBody(loginSchema), async (req, res, next) => {
   }
 });
 
+router.post('/forgot-password', async (_req, res, next) => {
+  try {
+    const result = await service.requestPasswordReset();
+    ok(res, result, undefined, 202);
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post('/reset-password', async (req, res, next) => {
+  try {
+    const result = await service.resetPassword(req.body?.username, req.body?.newPassword);
+    ok(res, result);
+  } catch (error) {
+    next(error);
+  }
+});
+
 router.post('/refresh', validateBody(refreshSchema), async (req, res, next) => {
   try {
     const result = await service.refresh(req.body.refreshToken);

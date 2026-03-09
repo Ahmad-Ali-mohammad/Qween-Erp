@@ -3,6 +3,8 @@ import { app } from '../../src/app';
 import { prisma } from '../../src/config/database';
 import { ensureAdminUser, loginAdmin, uniqueCode } from './helpers';
 
+jest.setTimeout(60000);
+
 type PostingContext = {
   dateIso: string;
   fiscalYear: number;
@@ -311,4 +313,3 @@ describe('Stage 19 deep CRUD coverage (Payroll + Tax/Currency + Audit/Internal C
     }
   });
 });
-

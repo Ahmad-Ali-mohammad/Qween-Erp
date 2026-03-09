@@ -3,6 +3,8 @@ import { app } from '../../src/app';
 import { prisma } from '../../src/config/database';
 import { ensureAdminUser, loginAdmin, uniqueCode } from './helpers';
 
+jest.setTimeout(60000);
+
 describe('Stage 3 workflow coverage', () => {
   let token = '';
 

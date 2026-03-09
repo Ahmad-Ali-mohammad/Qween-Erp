@@ -240,5 +240,8 @@ export async function runDepreciation(input: DepreciationRunInput) {
       },
       results
     };
+  }, {
+    maxWait: 10000,
+    timeout: 60000
   });
 }

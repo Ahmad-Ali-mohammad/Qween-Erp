@@ -62,6 +62,33 @@ export async function login(username: string, password: string) {
   };
 }
 
+export async function requestPasswordReset() {
+  return {
+    accepted: true,
+    message: 'تم استلام طلب إعادة التعيين'
+  };
+}
+
+export async function resetPassword(username: string, newPassword: string) {
+  const normalizedUsername = String(username ?? '').trim();
+  const normalizedPassword = String(newPassword ?? '').trim();
+
+  if (!normalizedUsername || normalizedPassword.length < 6) {
+    throw Errors.validation('بيانات إعادة التعيين غير مكتملة');
+  }
+
+  const user = await prisma.user.findUnique({ where: { username: normalizedUsername } });
+  if (!user) throw Errors.notFound('المستخدم غير موجود');
+
+  const password = await bcrypt.hash(normalizedPassword, env.bcryptRounds);
+  await prisma.user.update({
+    where: { id: user.id },
+    data: { password, failedLoginCount: 0, lockedUntil: null }
+  });
+
+  return { reset: true };
+}
+
 export async function refresh(refreshToken: string) {
   const session = await prisma.authSession.findUnique({ where: { refreshToken }, include: { user: true } });
   if (!session || session.revokedAt || session.expiresAt < new Date()) {
