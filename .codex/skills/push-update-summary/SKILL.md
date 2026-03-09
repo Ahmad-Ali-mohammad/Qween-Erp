@@ -31,6 +31,10 @@ Read only the smallest relevant set:
 - `git diff --stat <base>..HEAD`
 - targeted verification commands already run for the change
 
+For repeated use, prefer the bundled script:
+
+- `python .codex/skills/push-update-summary/scripts/generate_summary.py --base <base> --verify "<command>"`
+
 If the worktree is dirty, summarize only the scoped branch or commit range. Do not attribute unrelated local changes to the delivered work.
 
 ## Output shape
@@ -70,3 +74,18 @@ Use this structure:
 ## Repo-specific rule
 
 For ERP Qween work, if backend modules, Prisma behavior, integration tests, or app routing changed, mention the exact verification scope that passed, and explicitly note whether the summary was validated on the main worktree or an isolated worktree.
+
+## Script workflow
+
+Use the script to collect the branch delta and render the first draft:
+
+```powershell
+python .codex/skills/push-update-summary/scripts/generate_summary.py `
+  --base origin/master `
+  --verify "npm run lint" `
+  --verify "python .codex/skills/erp-qween-development/scripts/check_modular_guardrails.py" `
+  --verify "npx jest tests/integration --runInBand" `
+  --note "validated on isolated worktree 2821a1a"
+```
+
+Then tighten the wording before sending or pasting it. Keep the final text concise and scoped only to the delivered branch or commit range.
