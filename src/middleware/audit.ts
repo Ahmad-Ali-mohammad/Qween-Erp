@@ -8,6 +8,8 @@ export function audit(tableName: string) {
 
     res.json = ((body: any) => {
       if (res.statusCode < 400 && req.method !== 'GET') {
+        const payload = body && typeof body === 'object' && !Array.isArray(body) ? { ...body } : body;
+
         prisma.auditLog.create({
           data: {
             userId: req.user?.id,
@@ -19,7 +21,15 @@ export function audit(tableName: string) {
             ipAddress: req.ip,
             userAgent: req.get('user-agent') ?? null
           }
-        }).catch(() => undefined);
+        })
+          .then((entry) => {
+            if (payload && typeof payload === 'object' && !Array.isArray(payload) && payload.auditRef === undefined) {
+              payload.auditRef = entry.id;
+            }
+            return originalJson(payload);
+          })
+          .catch(() => originalJson(body));
+        return res as any;
       }
       return originalJson(body);
     }) as any;

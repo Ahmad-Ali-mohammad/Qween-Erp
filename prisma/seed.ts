@@ -54,13 +54,19 @@ async function seedCompany() {
     update: {
       nameAr: 'Ø´Ø±ÙƒØ© ÙˆØ§Ø­Ø¯Ø©',
       nameEn: 'Single Company ERP',
-      currency: 'SAR'
+      currency: 'KWD',
+      timezone: 'Asia/Kuwait',
+      locale: 'ar-KW',
+      baseCountry: 'KW'
     },
     create: {
       id: 1,
       nameAr: 'Ø´Ø±ÙƒØ© ÙˆØ§Ø­Ø¯Ø©',
       nameEn: 'Single Company ERP',
-      currency: 'SAR'
+      currency: 'KWD',
+      timezone: 'Asia/Kuwait',
+      locale: 'ar-KW',
+      baseCountry: 'KW'
     }
   });
 

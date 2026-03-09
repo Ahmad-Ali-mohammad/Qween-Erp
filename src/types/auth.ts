@@ -5,6 +5,13 @@ export interface AuthUser {
   username: string;
   roleId: number;
   permissions: Record<string, boolean>;
+  defaultBranchId?: number | null;
+  branchIds?: number[];
+  branchWriteIds?: number[];
+  projectIds?: number[];
+  projectWriteIds?: number[];
+  warehouseIds?: number[];
+  warehouseWriteIds?: number[];
 }
 
 export interface AuthRequest extends Request {

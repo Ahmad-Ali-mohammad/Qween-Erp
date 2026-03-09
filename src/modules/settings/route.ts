@@ -25,7 +25,10 @@ const companySchema = z.object({
   phone: z.string().optional(),
   email: z.string().optional(),
   fiscalYearStartMonth: z.number().int().min(1).max(12).optional(),
-  currency: z.string().optional()
+  currency: z.string().optional(),
+  timezone: z.string().optional(),
+  locale: z.string().optional(),
+  baseCountry: z.string().max(10).optional()
 });
 
 const systemSchema = z.object({
