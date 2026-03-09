@@ -19,6 +19,78 @@ function hashResetTokenSecret(secret: string) {
   return createHash('sha256').update(secret).digest('hex');
 }
 
+async function resolveRegistrationRole() {
+  return prisma.role.upsert({
+    where: { name: 'employee' },
+    update: {
+      nameAr: 'مستخدم أساسي',
+      description: 'صلاحيات افتراضية للتسجيل الذاتي'
+    },
+    create: {
+      name: 'employee',
+      nameAr: 'مستخدم أساسي',
+      description: 'صلاحيات افتراضية للتسجيل الذاتي',
+      permissions: {}
+    }
+  });
+}
+
+export async function register(input: {
+  username: string;
+  email: string;
+  fullName: string;
+  password: string;
+  phone?: string;
+  position?: string;
+}) {
+  const exists = await prisma.user.findFirst({
+    where: {
+      OR: [{ username: input.username }, { email: input.email }]
+    }
+  });
+  if (exists) throw Errors.conflict('اسم المستخدم أو البريد موجود بالفعل');
+
+  const role = await resolveRegistrationRole();
+  const password = await bcrypt.hash(input.password, env.bcryptRounds);
+  const user = await prisma.user.create({
+    data: {
+      username: input.username,
+      email: input.email,
+      fullName: input.fullName,
+      password,
+      phone: input.phone,
+      position: input.position,
+      roleId: role.id
+    },
+    include: { role: true }
+  });
+
+  const payload = { id: user.id, username: user.username, roleId: user.roleId };
+  const token = signAccessToken(payload);
+  const refreshToken = signRefreshToken(payload);
+  const expiresAt = new Date(Date.now() + 7 * 24 * 3600 * 1000);
+
+  await prisma.authSession.create({
+    data: {
+      userId: user.id,
+      refreshToken,
+      expiresAt
+    }
+  });
+
+  return {
+    token,
+    refreshToken,
+    user: {
+      id: user.id,
+      username: user.username,
+      fullName: user.fullName,
+      roleId: user.roleId,
+      permissions: user.role.permissions
+    }
+  };
+}
+
 export async function login(username: string, password: string) {
   const user = await prisma.user.findUnique({ where: { username }, include: { role: true } });
   if (!user || !user.isActive) throw Errors.unauthorized('بيانات الدخول غير صحيحة');

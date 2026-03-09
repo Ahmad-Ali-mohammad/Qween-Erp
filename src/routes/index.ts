@@ -31,12 +31,14 @@ import purchaseReturnsRoutes from '../modules/purchase-returns/route';
 import erpExpansionRoutes from '../modules/erp-expansion/route';
 import analyticsRoutes from '../modules/analytics/route';
 import apiCompatRoutes from '../modules/api-compat/route';
+import syncRoutes from '../modules/sync/route';
 import orgRoutes from '../modules/org/route';
 import numberingRoutes from '../modules/numbering/route';
 
 const router = Router();
 
 router.use('/auth', authRoutes);
+router.use('/sync', syncRoutes);
 router.use('/org', orgRoutes);
 router.use('/users', usersRoutes);
 router.use('/roles', rolesRoutes);
