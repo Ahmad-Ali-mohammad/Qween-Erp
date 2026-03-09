@@ -24,6 +24,7 @@ import periodsRoutes from '../modules/periods/route';
 import bankTransactionsRoutes from '../modules/bank-transactions/route';
 import assetCategoriesRoutes from '../modules/asset-categories/route';
 import depreciationRoutes from '../modules/depreciation/route';
+import centralRoutes from '../modules/central/route';
 import taxCodesRoutes from '../modules/tax-codes/route';
 import taxDeclarationsRoutes from '../modules/tax-declarations/route';
 import purchaseOrdersRoutes from '../modules/purchase-orders/route';
@@ -38,6 +39,7 @@ import numberingRoutes from '../modules/numbering/route';
 const router = Router();
 
 router.use('/auth', authRoutes);
+router.use('/central', centralRoutes);
 router.use('/sync', syncRoutes);
 router.use('/org', orgRoutes);
 router.use('/users', usersRoutes);
