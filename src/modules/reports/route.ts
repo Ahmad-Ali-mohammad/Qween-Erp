@@ -1,12 +1,105 @@
 ﻿import { Router } from 'express';
+import { z } from 'zod';
 import { prisma } from '../../config/database';
+import { Prisma } from '@prisma/client';
 import { authenticate } from '../../middleware/auth';
 import { requirePermissions } from '../../middleware/rbac';
+import { validateBody } from '../../middleware/validate';
+import { audit } from '../../middleware/audit';
 import { PERMISSIONS } from '../../constants/permissions';
 import { ok } from '../../utils/response';
+import { AuthRequest } from '../../types/auth';
 
 const router = Router();
 router.use(authenticate, requirePermissions(PERMISSIONS.REPORTS_READ));
+
+const snapshotCreateSchema = z
+  .object({
+    reportType: z.string().trim().min(1).max(80),
+    parameters: z.unknown().optional(),
+    status: z.string().trim().max(40).optional()
+  })
+  .strict();
+
+const snapshotCompleteSchema = z
+  .object({
+    status: z.string().trim().max(40).optional(),
+    fileUrl: z.string().trim().optional(),
+    generatedAt: z.string().optional()
+  })
+  .strict();
+
+router.get('/', async (_req, res) => {
+  const [saved, scheduled] = await Promise.all([
+    (prisma as any).savedReport.findMany({ orderBy: { id: 'desc' }, take: 50 }),
+    (prisma as any).scheduledReport.findMany({ orderBy: { id: 'desc' }, take: 50 })
+  ]);
+  ok(res, { saved, scheduled });
+});
+
+router.get('/snapshots', async (req, res) => {
+  const where: any = {};
+  if (req.query.status) where.status = String(req.query.status);
+  if (req.query.reportType) where.reportType = String(req.query.reportType);
+  const rows = await prisma.reportSnapshot.findMany({
+    where,
+    orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    take: 200
+  });
+  ok(res, rows);
+});
+
+router.post('/snapshots', validateBody(snapshotCreateSchema), audit('report_snapshots'), async (req: AuthRequest, res) => {
+  const row = await prisma.reportSnapshot.create({
+    data: {
+      reportType: req.body.reportType,
+      parameters: req.body.parameters ?? null,
+      status: req.body.status ?? 'QUEUED',
+      createdBy: req.user?.id ?? null
+    }
+  });
+  ok(res, row, undefined, 201);
+});
+
+router.post('/snapshots/:id/complete', validateBody(snapshotCompleteSchema), audit('report_snapshots'), async (req, res) => {
+  const id = Number(req.params.id);
+  const row = await prisma.reportSnapshot.update({
+    where: { id },
+    data: {
+      status: req.body.status ?? 'COMPLETED',
+      fileUrl: req.body.fileUrl ?? null,
+      generatedAt: req.body.generatedAt ? new Date(String(req.body.generatedAt)) : new Date()
+    }
+  });
+  ok(res, row);
+});
+
+router.get('/financial-summary', async (_req, res) => {
+  const [journalCount, invoiceCount, paymentCount] = await Promise.all([
+    prisma.journalEntry.count(),
+    prisma.invoice.count(),
+    prisma.payment.count()
+  ]);
+  ok(res, { journalCount, invoiceCount, paymentCount });
+});
+
+router.get('/operational-summary', async (_req, res) => {
+  const [projectCount, purchaseRequestCount, stockMovementCount] = await Promise.all([
+    prisma.project.count(),
+    prisma.purchaseRequest.count(),
+    prisma.stockMovement.count()
+  ]);
+  ok(res, { projectCount, purchaseRequestCount, stockMovementCount });
+});
+
+router.get('/hr-summary', async (_req, res) => {
+  const [employeeCount, leaveCount, attendanceCount] = await Promise.all([
+    prisma.employee.count(),
+    prisma.leaveRequest.count(),
+    prisma.attendance.count()
+  ]);
+  ok(res, { employeeCount, leaveCount, attendanceCount });
+});
 
 function toPositiveInt(value: unknown): number | undefined {
   const parsed = Number(value);
@@ -112,11 +205,156 @@ function buildComparisonRange(from: Date, to: Date, compareWith: string): { from
   return { from: prevFrom, to: prevTo };
 }
 
+function buildDimensionLineWhere(query: any): Prisma.JournalLineWhereInput {
+  const where: Prisma.JournalLineWhereInput = {};
+
+  const projectId = toPositiveInt(query.projectId);
+  const departmentId = toPositiveInt(query.departmentId);
+  const costCenterId = toPositiveInt(query.costCenterId);
+
+  if (projectId) where.projectId = projectId;
+  if (departmentId) where.departmentId = departmentId;
+  if (costCenterId) where.costCenterId = costCenterId;
+
+  return where;
+}
+
+function hasDimensionFilters(where: Prisma.JournalLineWhereInput): boolean {
+  return where.projectId !== undefined || where.departmentId !== undefined || where.costCenterId !== undefined;
+}
+
+function buildFiscalYearRelationFilter(fiscalYear?: number): Prisma.FiscalYearWhereInput | undefined {
+  if (fiscalYear === undefined) return undefined;
+
+  return {
+    startDate: {
+      gte: new Date(Date.UTC(fiscalYear, 0, 1)),
+      lt: new Date(Date.UTC(fiscalYear + 1, 0, 1))
+    }
+  };
+}
+
+async function buildPostedLineWhere(
+  query: any,
+  options?: {
+    dateFrom?: Date;
+    dateTo?: Date;
+    asOfDate?: Date;
+    accountTypes?: string[];
+    accountIds?: number[];
+    requireClosedRange?: boolean;
+  }
+): Promise<Prisma.JournalLineWhereInput> {
+  const [fiscalYear, period] = await Promise.all([resolveFiscalYearNumber(query), resolvePeriodNumber(query)]);
+  const entryWhere: Prisma.JournalEntryWhereInput = { status: 'POSTED' };
+
+  if (options?.asOfDate) {
+    entryWhere.date = { lte: options.asOfDate };
+  } else if (options?.dateFrom || options?.dateTo || options?.requireClosedRange) {
+    entryWhere.date = {};
+    if (options?.dateFrom) entryWhere.date.gte = options.dateFrom;
+    if (options?.dateTo) entryWhere.date.lte = options.dateTo;
+  }
+
+  if (fiscalYear !== undefined || period !== undefined) {
+    entryWhere.period = {
+      is: {
+        ...(period !== undefined ? { number: period } : {}),
+        ...(fiscalYear !== undefined
+          ? {
+              fiscalYear: {
+                is: buildFiscalYearRelationFilter(fiscalYear)
+              }
+            }
+          : {})
+      }
+    };
+  }
+
+  const where: Prisma.JournalLineWhereInput = {
+    ...buildDimensionLineWhere(query),
+    entry: entryWhere
+  };
+
+  if (options?.accountTypes?.length) {
+    where.account = { is: { type: { in: options.accountTypes as any[] } } };
+  }
+
+  if (options?.accountIds?.length) {
+    where.accountId = { in: options.accountIds };
+  }
+
+  return where;
+}
+
+function aggregateLinesByAccount(
+  lines: Array<{
+    accountId: number;
+    debit: Prisma.Decimal | number;
+    credit: Prisma.Decimal | number;
+    account: { id: number; code: string; nameAr: string; type: string; normalBalance: string };
+  }>
+) {
+  const byAccount = new Map<
+    number,
+    {
+      accountId: number;
+      account: { id: number; code: string; nameAr: string; type: string; normalBalance: string };
+      debit: number;
+      credit: number;
+      closingBalance: number;
+    }
+  >();
+
+  for (const line of lines) {
+    const current = byAccount.get(line.accountId) ?? {
+      accountId: line.accountId,
+      account: line.account,
+      debit: 0,
+      credit: 0,
+      closingBalance: 0
+    };
+
+    current.debit += Number(line.debit);
+    current.credit += Number(line.credit);
+    byAccount.set(line.accountId, current);
+  }
+
+  return [...byAccount.values()]
+    .map((row) => ({
+      ...row,
+      closingBalance: row.account.normalBalance === 'Credit' ? row.credit - row.debit : row.debit - row.credit
+    }))
+    .sort((a, b) => a.account.code.localeCompare(b.account.code));
+}
+
 router.get('/trial-balance', async (req, res) => {
   const [fiscalYear, period] = await Promise.all([
     resolveFiscalYearNumber(req.query),
     resolvePeriodNumber(req.query)
   ]);
+  const dimensionWhere = buildDimensionLineWhere(req.query);
+
+  if (hasDimensionFilters(dimensionWhere)) {
+    const lines = await prisma.journalLine.findMany({
+      where: await buildPostedLineWhere(req.query, {
+        dateFrom: req.query.dateFrom ? parseDateOrFallback(req.query.dateFrom, new Date('2000-01-01')) : undefined,
+        dateTo: req.query.dateTo ? parseDateOrFallback(req.query.dateTo, new Date()) : undefined
+      }),
+      include: { account: true },
+      orderBy: [{ account: { code: 'asc' } }, { lineNumber: 'asc' }]
+    });
+
+    const accounts = aggregateLinesByAccount(lines);
+    const totals = accounts.reduce(
+      (acc, row) => ({ debit: acc.debit + row.debit, credit: acc.credit + row.credit }),
+      { debit: 0, credit: 0 }
+    );
+
+    ok(res, { accounts, totals: { ...totals, difference: totals.debit - totals.credit } });
+    return;
+  }
+
   const where: any = {};
   if (fiscalYear !== undefined) where.fiscalYear = fiscalYear;
   if (period !== undefined) where.period = period;
@@ -135,7 +373,7 @@ router.get('/income-statement', async (req, res) => {
   const { from, to } = await resolveDateRange(req.query);
 
   const lines = await prisma.journalLine.findMany({
-    where: { entry: { status: 'POSTED', date: { gte: from, lte: to } } },
+    where: await buildPostedLineWhere(req.query, { dateFrom: from, dateTo: to, requireClosedRange: true }),
     include: { account: true }
   });
 
@@ -149,7 +387,11 @@ router.get('/income-statement', async (req, res) => {
     const compareWith = String(req.query.compareWith).trim().toLowerCase();
     const compareRange = buildComparisonRange(from, to, compareWith);
     const compareLines = await prisma.journalLine.findMany({
-      where: { entry: { status: 'POSTED', date: { gte: compareRange.from, lte: compareRange.to } } },
+      where: await buildPostedLineWhere(req.query, {
+        dateFrom: compareRange.from,
+        dateTo: compareRange.to,
+        requireClosedRange: true
+      }),
       include: { account: true }
     });
     payload.compare = {
@@ -164,6 +406,42 @@ router.get('/income-statement', async (req, res) => {
 
 router.get('/balance-sheet', async (req, res) => {
   const asOfDate = parseDateOrFallback(req.query.asOfDate, new Date());
+  const dimensionWhere = buildDimensionLineWhere(req.query);
+
+  if (hasDimensionFilters(dimensionWhere)) {
+    const lines = await prisma.journalLine.findMany({
+      where: await buildPostedLineWhere(req.query, {
+        asOfDate,
+        accountTypes: ['ASSET', 'LIABILITY', 'EQUITY']
+      }),
+      include: { account: true }
+    });
+
+    const accounts = aggregateLinesByAccount(lines);
+    const assets = accounts.filter((row) => row.account.type === 'ASSET');
+    const liabilities = accounts.filter((row) => row.account.type === 'LIABILITY');
+    const equity = accounts.filter((row) => row.account.type === 'EQUITY');
+    const sum = (rows: typeof accounts) => rows.reduce((total, row) => total + row.closingBalance, 0);
+    const totalAssets = sum(assets);
+    const totalLiabilities = sum(liabilities);
+    const totalEquity = sum(equity);
+
+    ok(res, {
+      asOfDate: asOfDate.toISOString(),
+      assets,
+      liabilities,
+      equity,
+      totals: {
+        totalAssets,
+        totalLiabilities,
+        totalEquity,
+        totalLiabilitiesAndEquity: totalLiabilities + totalEquity,
+        balanced: Math.abs(totalAssets - (totalLiabilities + totalEquity)) < 0.01
+      }
+    });
+    return;
+  }
+
   const [resolvedFiscalYear, resolvedPeriod] = await Promise.all([
     resolveFiscalYearNumber(req.query),
     resolvePeriodNumber(req.query)
@@ -220,7 +498,10 @@ router.get('/account-statement', async (req, res) => {
 
   const account = await prisma.account.findUnique({ where: { id: accountId } });
   const lines = await prisma.journalLine.findMany({
-    where: { accountId, entry: { status: 'POSTED', date: { gte: dateFrom, lte: dateTo } } },
+    where: {
+      ...(await buildPostedLineWhere(req.query, { dateFrom, dateTo, requireClosedRange: true })),
+      accountId
+    },
     include: { entry: true },
     orderBy: { entry: { date: 'asc' } }
   });
@@ -401,7 +682,51 @@ router.get('/aging', async (req, res) => {
   ok(res, data);
 });
 
-router.get('/cash-flow', async (_req, res) => {
+router.get('/cash-flow', async (req, res) => {
+  const dimensionWhere = buildDimensionLineWhere(req.query);
+
+  if (hasDimensionFilters(dimensionWhere) || req.query.dateFrom || req.query.dateTo || req.query.periodId || req.query.fiscalYearId) {
+    const { from, to } = await resolveDateRange(req.query);
+    const cashAccounts = await prisma.account.findMany({
+      where: {
+        isActive: true,
+        OR: [{ bankAccounts: { some: {} } }, { code: '1100' }]
+      },
+      select: { id: true }
+    });
+
+    if (!cashAccounts.length) {
+      ok(res, {
+        period: { dateFrom: from.toISOString(), dateTo: to.toISOString() },
+        operatingInflow: 0,
+        operatingOutflow: 0,
+        netCashFlow: 0
+      });
+      return;
+    }
+
+    const lines = await prisma.journalLine.findMany({
+      where: await buildPostedLineWhere(req.query, {
+        dateFrom: from,
+        dateTo: to,
+        accountIds: cashAccounts.map((row) => row.id),
+        requireClosedRange: true
+      }),
+      select: { debit: true, credit: true }
+    });
+
+    const inflow = lines.reduce((sum, line) => sum + Number(line.debit), 0);
+    const outflow = lines.reduce((sum, line) => sum + Number(line.credit), 0);
+
+    ok(res, {
+      period: { dateFrom: from.toISOString(), dateTo: to.toISOString() },
+      operatingInflow: inflow,
+      operatingOutflow: outflow,
+      netCashFlow: inflow - outflow
+    });
+    return;
+  }
+
   const [receipts, payments] = await Promise.all([
     prisma.payment.aggregate({ _sum: { amount: true }, where: { type: 'RECEIPT', status: 'COMPLETED' } }),
     prisma.payment.aggregate({ _sum: { amount: true }, where: { type: 'PAYMENT', status: 'COMPLETED' } })

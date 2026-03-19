@@ -15,6 +15,7 @@ const createSchema = z.object({
   fullName: z.string().min(1),
   password: z.string().min(6),
   roleId: z.number().int().positive(),
+  defaultBranchId: z.number().int().positive().nullable().optional(),
   phone: z.string().optional(),
   position: z.string().optional()
 });
@@ -25,7 +26,13 @@ const router = Router();
 router.use(authenticate, requirePermissions(PERMISSIONS.USERS_READ));
 
 router.get('/', async (_req, res) => {
-  const users = await prisma.user.findMany({ include: { role: true }, orderBy: { id: 'desc' } });
+  const users = await prisma.user.findMany({
+    include: {
+      role: true,
+      defaultBranch: { select: { id: true, code: true, nameAr: true, nameEn: true } }
+    },
+    orderBy: { id: 'desc' }
+  });
   ok(res, users);
 });
 
@@ -50,9 +57,46 @@ router.post('/', requirePermissions(PERMISSIONS.USERS_WRITE), validateBody(creat
 
 router.get('/:id', async (req, res, next) => {
   try {
-    const user = await prisma.user.findUnique({ where: { id: Number(req.params.id) }, include: { role: true } });
+    const user = await prisma.user.findUnique({
+      where: { id: Number(req.params.id) },
+      include: {
+        role: true,
+        defaultBranch: { select: { id: true, code: true, nameAr: true, nameEn: true } },
+        branchAccesses: true,
+        projectAccesses: true,
+        warehouseAccesses: true
+      }
+    });
     if (!user) throw Errors.notFound('المستخدم غير موجود');
     ok(res, user);
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get('/:id/branches', async (req, res, next) => {
+  try {
+    const userId = Number(req.params.id);
+    const rows = await prisma.userBranchAccess.findMany({
+      where: { userId },
+      include: { branch: true },
+      orderBy: { id: 'desc' }
+    });
+    ok(res, rows);
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get('/:id/warehouses', async (req, res, next) => {
+  try {
+    const userId = Number(req.params.id);
+    const rows = await prisma.userWarehouseAccess.findMany({
+      where: { userId },
+      include: { warehouse: true },
+      orderBy: { id: 'desc' }
+    });
+    ok(res, rows);
   } catch (error) {
     next(error);
   }

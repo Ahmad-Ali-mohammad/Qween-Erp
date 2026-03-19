@@ -7,8 +7,10 @@ import { PERMISSIONS } from '../../constants/permissions';
 import { buildSequentialNumber, buildSequentialNumberFromLatest } from '../../utils/id-generator';
 import * as journalService from '../journals/service';
 import * as invoiceService from '../invoices/service';
+import * as inventoryService from '../inventory/service';
 import * as paymentService from '../payments/service';
 import * as purchaseOrderService from '../purchase-orders/service';
+import * as projectService from '../projects/service';
 import * as quoteService from '../quotes/service';
 import * as taxDeclarationService from '../tax-declarations/service';
 import { applyLedgerLines } from '../shared/ledger';
@@ -67,6 +69,190 @@ router.post('/auth/reset-password', async (req: Request, res: Response) => {
 });
 
 router.use(authenticate);
+
+// Compatibility list endpoints for legacy dashboards/tests
+router.get('/goods-receipts', async (req: Request, res: Response) => {
+  const { page, limit, skip } = parsePagination(req.query);
+  const [rows, total] = await Promise.all([
+    (prisma as any).purchaseReceipt.findMany({ skip, take: limit, orderBy: { id: 'desc' } }),
+    (prisma as any).purchaseReceipt.count()
+  ]);
+  ok(res, rows, { page, limit, total, pages: Math.max(1, Math.ceil(total / limit)) });
+});
+
+router.get('/stock-moves', async (req: Request, res: Response) => {
+  const { page, limit, skip } = parsePagination(req.query);
+  const [rows, total] = await Promise.all([
+    prisma.stockMovement.findMany({ skip, take: limit, orderBy: { id: 'desc' } }),
+    prisma.stockMovement.count()
+  ]);
+  ok(res, rows, { page, limit, total, pages: Math.max(1, Math.ceil(total / limit)) });
+});
+
+router.get('/attendance', async (req: Request, res: Response) => {
+  const { page, limit, skip } = parsePagination(req.query);
+  const [rows, total] = await Promise.all([
+    prisma.attendance.findMany({ skip, take: limit, orderBy: { id: 'desc' } }),
+    prisma.attendance.count()
+  ]);
+  ok(res, rows, { page, limit, total, pages: Math.max(1, Math.ceil(total / limit)) });
+});
+
+router.get('/leave-requests', async (req: Request, res: Response) => {
+  const { page, limit, skip } = parsePagination(req.query);
+  const [rows, total] = await Promise.all([
+    prisma.leaveRequest.findMany({ skip, take: limit, orderBy: { id: 'desc' } }),
+    prisma.leaveRequest.count()
+  ]);
+  ok(res, rows, { page, limit, total, pages: Math.max(1, Math.ceil(total / limit)) });
+});
+
+router.get('/equipment', async (req: Request, res: Response) => {
+  const { page, limit, skip } = parsePagination(req.query);
+  const [rows, total] = await Promise.all([
+    prisma.fixedAsset.findMany({ skip, take: limit, orderBy: { id: 'desc' }, include: { category: true } }),
+    prisma.fixedAsset.count()
+  ]);
+  ok(res, rows, { page, limit, total, pages: Math.max(1, Math.ceil(total / limit)) });
+});
+
+router.get('/equipment-allocations', async (req: Request, res: Response) => {
+  const { page, limit, skip } = parsePagination(req.query);
+  const [rows, total] = await Promise.all([
+    prisma.equipmentAllocation.findMany({ skip, take: limit, orderBy: { id: 'desc' } }),
+    prisma.equipmentAllocation.count()
+  ]);
+  ok(res, rows, { page, limit, total, pages: Math.max(1, Math.ceil(total / limit)) });
+});
+
+router.get('/workflows', async (req: Request, res: Response) => {
+  const { page, limit, skip } = parsePagination(req.query);
+  const [rows, total] = await Promise.all([
+    prisma.workflowInstance.findMany({ skip, take: limit, orderBy: { id: 'desc' } }),
+    prisma.workflowInstance.count()
+  ]);
+  ok(res, rows, { page, limit, total, pages: Math.max(1, Math.ceil(total / limit)) });
+});
+
+router.get('/workflow-actions', async (req: Request, res: Response) => {
+  const { page, limit, skip } = parsePagination(req.query);
+  const [rows, total] = await Promise.all([
+    prisma.workflowAction.findMany({ skip, take: limit, orderBy: { createdAt: 'desc' } }),
+    prisma.workflowAction.count()
+  ]);
+  ok(res, rows, { page, limit, total, pages: Math.max(1, Math.ceil(total / limit)) });
+});
+
+router.get('/user-tasks', async (req: Request, res: Response) => {
+  const { page, limit, skip } = parsePagination(req.query);
+  const where: any = {};
+  const assignee = String(req.query.assignee ?? '').trim();
+  if (assignee) {
+    if (assignee === 'me') {
+      where.userId = Number((req as any).user?.id ?? 0) || undefined;
+    } else if (Number(assignee)) {
+      where.userId = Number(assignee);
+    }
+  }
+  const status = String(req.query.status ?? '').trim();
+  if (status) where.status = status;
+
+  const [rows, total] = await Promise.all([
+    prisma.userTask.findMany({ where, skip, take: limit, orderBy: { id: 'desc' } }),
+    prisma.userTask.count({ where })
+  ]);
+  ok(res, rows, { page, limit, total, pages: Math.max(1, Math.ceil(total / limit)) });
+});
+
+router.get('/workflow-instances', async (req: Request, res: Response) => {
+  const { page, limit, skip } = parsePagination(req.query);
+  const [rows, total] = await Promise.all([
+    prisma.workflowInstance.findMany({ skip, take: limit, orderBy: { id: 'desc' } }),
+    prisma.workflowInstance.count()
+  ]);
+  ok(res, rows, { page, limit, total, pages: Math.max(1, Math.ceil(total / limit)) });
+});
+
+router.get('/workflow-instances/:id', async (req: Request, res: Response) => {
+  const id = parsePositiveInt(req.params.id, 'workflowInstanceId');
+  const instance = await prisma.workflowInstance.findUnique({ where: { id } });
+  if (!instance) {
+    throw Errors.notFound('Workflow instance not found');
+  }
+  ok(res, instance);
+});
+
+router.get('/branches', async (req: Request, res: Response) => {
+  const { page, limit, skip } = parsePagination(req.query);
+  const [rows, total] = await Promise.all([
+    prisma.branch.findMany({ skip, take: limit, orderBy: { id: 'desc' } }),
+    prisma.branch.count()
+  ]);
+  ok(res, rows, { page, limit, total, pages: Math.max(1, Math.ceil(total / limit)) });
+});
+
+router.get('/branches/:id', async (req: Request, res: Response) => {
+  const id = parsePositiveInt(req.params.id, 'branchId');
+  const branch = await prisma.branch.findUnique({ where: { id } });
+  if (!branch) {
+    throw Errors.notFound('Branch not found');
+  }
+  ok(res, branch);
+});
+
+router.get('/departments', async (req: Request, res: Response) => {
+  const { page, limit, skip } = parsePagination(req.query);
+  const [rows, total] = await Promise.all([
+    prisma.department.findMany({ skip, take: limit, orderBy: { id: 'desc' } }),
+    prisma.department.count()
+  ]);
+  ok(res, rows, { page, limit, total, pages: Math.max(1, Math.ceil(total / limit)) });
+});
+
+router.get('/cost-centers', async (req: Request, res: Response) => {
+  const { page, limit, skip } = parsePagination(req.query);
+  const [rows, total] = await Promise.all([
+    prisma.costCenter.findMany({ skip, take: limit, orderBy: { id: 'desc' } }),
+    prisma.costCenter.count()
+  ]);
+  ok(res, rows, { page, limit, total, pages: Math.max(1, Math.ceil(total / limit)) });
+});
+
+router.get('/metrics/endpoints', async (_req: Request, res: Response) => {
+  ok(res, []);
+});
+
+router.get('/export/users', async (req: Request, res: Response) => {
+  const format = String(req.query.format ?? 'csv').toLowerCase();
+  const users = await prisma.user.findMany({ select: { id: true, username: true, email: true, fullName: true } });
+
+  if (format === 'csv') {
+    const header = 'id,username,email,fullName';
+    const lines = users.map((u) => [u.id, u.username, u.email ?? '', u.fullName ?? ''].join(','));
+    res.setHeader('Content-Type', 'text/csv');
+    res.status(200).send([header, ...lines].join('\n'));
+    return;
+  }
+
+  res.status(400).json({
+    success: false,
+    error: { code: 'UNSUPPORTED_FORMAT', message: 'Unsupported export format' }
+  });
+});
+
+router.get('/backups/status', async (_req: Request, res: Response) => {
+  const [total, queued, running, failed] = await Promise.all([
+    (prisma as any).backupJob.count(),
+    (prisma as any).backupJob.count({ where: { status: 'QUEUED' } }),
+    (prisma as any).backupJob.count({ where: { status: 'RUNNING' } }),
+    (prisma as any).backupJob.count({ where: { status: 'FAILED' } })
+  ]);
+  ok(res, { total, queued, running, failed });
+});
+
+router.get('/logs', async (_req: Request, res: Response) => {
+  ok(res, []);
+});
 
 // Quick Access
 router.get('/quick-journal/form-data', async (_req: Request, res: Response) => {
@@ -1304,7 +1490,7 @@ router.get('/inventory-transactions', async (req: Request, res: Response) => {
 });
 
 router.post('/inventory-transactions', async (req: Request, res: Response) => {
-  ok(res, await prisma.stockMovement.create({ data: req.body }), undefined, 201);
+  ok(res, await inventoryService.createInventoryMovement(req.body), undefined, 201);
 });
 
 router.get('/reports/inventory-valuation', async (_req: Request, res: Response) => {
@@ -1740,7 +1926,7 @@ router.post('/currency/revaluate', async (req: Request, res: Response) => {
 
   const result = await prisma.$transaction(async (tx) => {
     const company = await tx.companyProfile.findUnique({ where: { id: 1 } });
-    const baseCurrency = String(req.body?.baseCurrency ?? company?.currency ?? 'SAR').toUpperCase();
+    const baseCurrency = String(req.body?.baseCurrency ?? company?.currency ?? 'KWD').toUpperCase();
     const reference = `FXREV-${asOfDateKey}`;
 
     const existing = await tx.journalEntry.findFirst({
@@ -2598,13 +2784,12 @@ router.get('/contacts/:id', async (req: Request, res: Response) => {
 
 router.put('/expenses/:id', async (req: Request, res: Response) => {
   const id = parsePositiveInt(req.params.id, 'expenseId');
-  ok(res, await prisma.projectExpense.update({ where: { id }, data: req.body }));
+  ok(res, await projectService.updateProjectExpense(id, req.body));
 });
 
 router.delete('/expenses/:id', async (req: Request, res: Response) => {
   const id = parsePositiveInt(req.params.id, 'expenseId');
-  await prisma.projectExpense.delete({ where: { id } });
-  ok(res, { deleted: true });
+  ok(res, await projectService.deleteProjectExpense(id));
 });
 
 router.post('/leaves/:id/approve', async (req: any, res: Response) => {

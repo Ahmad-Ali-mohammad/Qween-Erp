@@ -1,3 +1,4 @@
+﻿﻿import { Prisma } from '@prisma/client';
 import { prisma } from '../../config/database';
 import { parseDateOrThrow } from '../../utils/date';
 import { Errors } from '../../utils/response';
@@ -9,26 +10,24 @@ async function generateNumber(tx: any, type: 'SALES' | 'PURCHASE', docDate: Date
   const year = docDate.getUTCFullYear();
   const month = String(docDate.getUTCMonth() + 1).padStart(2, '0');
   const prefix = type === 'SALES' ? 'INV' : 'PINV';
-  const sequencePrefix = `${prefix}-${year}-${month}-`;
-
+  const numberPrefix = `${prefix}-${year}-${month}-`;
   await tx.$executeRawUnsafe('LOCK TABLE "Invoice" IN EXCLUSIVE MODE');
-  const existing = await tx.invoice.findMany({
+  const latest = await tx.invoice.findFirst({
     where: {
       type,
-      number: { startsWith: sequencePrefix }
+      date: { gte: new Date(Date.UTC(year, 0, 1)), lt: new Date(Date.UTC(year + 1, 0, 1)) },
+      number: { startsWith: numberPrefix }
     },
-    select: { number: true }
+    select: { number: true },
+    orderBy: { id: 'desc' }
   });
-
-  let maxSequence = 0;
-  for (const row of existing) {
-    const sequence = Number.parseInt(String(row.number).slice(sequencePrefix.length), 10);
-    if (Number.isInteger(sequence) && sequence > maxSequence) {
-      maxSequence = sequence;
-    }
+  let next = 1;
+  if (latest?.number?.startsWith(numberPrefix)) {
+    const raw = latest.number.slice(numberPrefix.length);
+    const parsed = Number(raw);
+    if (Number.isInteger(parsed) && parsed > 0) next = parsed + 1;
   }
-
-  return `${sequencePrefix}${String(maxSequence + 1).padStart(5, '0')}`;
+  return `${prefix}-${year}-${month}-${String(next).padStart(5, '0')}`;
 }
 
 function calcLines(lines: any[]) {
@@ -154,38 +153,57 @@ export async function createInvoice(data: any, userId: number) {
   const invoiceDate = parseDateOrThrow(data.date);
   const calc = calcLines(data.lines);
 
-  return prisma.$transaction(async (tx) => {
-    const number = await generateNumber(tx, data.type, invoiceDate);
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      return await prisma.$transaction(async (tx) => {
+        const number = await generateNumber(tx, data.type, invoiceDate);
 
-    const invoice = await tx.invoice.create({
-      data: {
-        number,
-        type: data.type,
-        customerId: data.customerId,
-        supplierId: data.supplierId,
-        date: invoiceDate,
-        dueDate: data.dueDate ? parseDateOrThrow(data.dueDate, 'dueDate') : null,
-        projectId: data.projectId,
-        notes: data.notes,
-        subtotal: calc.subtotal,
-        discount: calc.discount,
-        taxableAmount: calc.taxableAmount,
-        vatAmount: calc.vatAmount,
-        total: calc.total,
-        paidAmount: 0,
-        outstanding: calc.total,
-        status: 'DRAFT',
-        paymentStatus: 'PENDING',
-        createdById: userId
+        const invoice = await tx.invoice.create({
+          data: {
+            number,
+            type: data.type,
+            customerId: data.customerId,
+            supplierId: data.supplierId,
+            date: invoiceDate,
+            dueDate: data.dueDate ? parseDateOrThrow(data.dueDate, 'dueDate') : null,
+            projectId: data.projectId,
+            notes: data.notes,
+            subtotal: calc.subtotal,
+            discount: calc.discount,
+            taxableAmount: calc.taxableAmount,
+            vatAmount: calc.vatAmount,
+            total: calc.total,
+            paidAmount: 0,
+            outstanding: calc.total,
+            status: 'DRAFT',
+            paymentStatus: 'PENDING',
+            createdById: userId
+          }
+        });
+
+        await tx.invoiceLine.createMany({
+          data: calc.mapped.map((line) => ({ ...line, invoiceId: invoice.id }))
+        });
+
+        return invoice;
+      });
+    } catch (error) {
+      lastError = error;
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2002' &&
+        Array.isArray(error.meta?.target) &&
+        error.meta?.target.includes('number') &&
+        attempt < 2
+      ) {
+        continue;
       }
-    });
+      throw error;
+    }
+  }
 
-    await tx.invoiceLine.createMany({
-      data: calc.mapped.map((line) => ({ ...line, invoiceId: invoice.id }))
-    });
-
-    return invoice;
-  });
+  throw lastError;
 }
 
 export async function issueInvoice(id: number, userId: number) {

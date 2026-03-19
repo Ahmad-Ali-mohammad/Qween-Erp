@@ -8,8 +8,125 @@ import { signAccessToken, signRefreshToken } from '../../middleware/auth';
 const LOCK_MINUTES = 15;
 const MAX_FAILED = 5;
 
+type AuthPayload = {
+  id: number;
+  username: string;
+  roleId: number;
+};
+
+type UserWithRole = {
+  id: number;
+  username: string;
+  fullName: string;
+  roleId: number;
+  defaultBranchId?: number | null;
+  role: {
+    permissions: unknown;
+  };
+  branchAccesses?: Array<{ branchId: number }>;
+  projectAccesses?: Array<{ projectId: number }>;
+  warehouseAccesses?: Array<{ warehouseId: number }>;
+};
+
+function toPublicUser(user: UserWithRole) {
+  return {
+    id: user.id,
+    username: user.username,
+    fullName: user.fullName,
+    roleId: user.roleId,
+    permissions: (user.role.permissions ?? {}) as Record<string, boolean>,
+    defaultBranchId: user.defaultBranchId ?? null,
+    branchIds: user.branchAccesses?.map((row) => row.branchId) ?? [],
+    projectIds: user.projectAccesses?.map((row) => row.projectId) ?? [],
+    warehouseIds: user.warehouseAccesses?.map((row) => row.warehouseId) ?? []
+  };
+}
+
+async function createSession(user: UserWithRole) {
+  const payload: AuthPayload = { id: user.id, username: user.username, roleId: user.roleId };
+  const token = signAccessToken(payload);
+  const refreshToken = signRefreshToken(payload);
+  const expiresAt = new Date(Date.now() + 7 * 24 * 3600 * 1000);
+
+  await prisma.authSession.create({
+    data: {
+      userId: user.id,
+      refreshToken,
+      expiresAt
+    }
+  });
+
+  return {
+    token,
+    refreshToken,
+    user: toPublicUser(user)
+  };
+}
+
+async function resolveRegistrationRole() {
+  return prisma.role.upsert({
+    where: { name: 'employee' },
+    update: {
+      nameAr: 'مستخدم أساسي',
+      description: 'صلاحيات افتراضية للتسجيل الذاتي'
+    },
+    create: {
+      name: 'employee',
+      nameAr: 'مستخدم أساسي',
+      description: 'صلاحيات افتراضية للتسجيل الذاتي',
+      permissions: {}
+    }
+  });
+}
+
+export async function register(input: {
+  username: string;
+  email: string;
+  fullName: string;
+  password: string;
+  phone?: string;
+  position?: string;
+}) {
+  const exists = await prisma.user.findFirst({
+    where: {
+      OR: [{ username: input.username }, { email: input.email }]
+    }
+  });
+  if (exists) throw Errors.conflict('اسم المستخدم أو البريد موجود بالفعل');
+
+  const role = await resolveRegistrationRole();
+  const password = await bcrypt.hash(input.password, env.bcryptRounds);
+  const user = await prisma.user.create({
+    data: {
+      username: input.username,
+      email: input.email,
+      fullName: input.fullName,
+      password,
+      phone: input.phone,
+      position: input.position,
+      roleId: role.id
+    },
+    include: {
+      role: true,
+      branchAccesses: { select: { branchId: true } },
+      projectAccesses: { select: { projectId: true } },
+      warehouseAccesses: { select: { warehouseId: true } }
+    }
+  });
+
+  return createSession(user as UserWithRole);
+}
+
 export async function login(username: string, password: string) {
-  const user = await prisma.user.findUnique({ where: { username }, include: { role: true } });
+  const user = await prisma.user.findUnique({
+    where: { username },
+    include: {
+      role: true,
+      branchAccesses: { select: { branchId: true } },
+      projectAccesses: { select: { projectId: true } },
+      warehouseAccesses: { select: { warehouseId: true } }
+    }
+  });
   if (!user || !user.isActive) throw Errors.unauthorized('بيانات الدخول غير صحيحة');
 
   if (user.lockedUntil && user.lockedUntil > new Date()) {
@@ -35,31 +152,7 @@ export async function login(username: string, password: string) {
     data: { failedLoginCount: 0, lockedUntil: null, lastLogin: new Date() }
   });
 
-  const payload = { id: user.id, username: user.username, roleId: user.roleId };
-  const token = signAccessToken(payload);
-  const refreshToken = signRefreshToken(payload);
-
-  const expiresAt = new Date(Date.now() + 7 * 24 * 3600 * 1000);
-
-  await prisma.authSession.create({
-    data: {
-      userId: user.id,
-      refreshToken,
-      expiresAt
-    }
-  });
-
-  return {
-    token,
-    refreshToken,
-    user: {
-      id: user.id,
-      username: user.username,
-      fullName: user.fullName,
-      roleId: user.roleId,
-      permissions: user.role.permissions
-    }
-  };
+  return createSession(user as UserWithRole);
 }
 
 export async function requestPasswordReset() {
@@ -83,7 +176,11 @@ export async function resetPassword(username: string, newPassword: string) {
   const password = await bcrypt.hash(normalizedPassword, env.bcryptRounds);
   await prisma.user.update({
     where: { id: user.id },
-    data: { password, failedLoginCount: 0, lockedUntil: null }
+    data: {
+      password,
+      failedLoginCount: 0,
+      lockedUntil: null
+    }
   });
 
   return { reset: true };
@@ -96,7 +193,7 @@ export async function refresh(refreshToken: string) {
   }
 
   const decoded = jwt.verify(refreshToken, env.jwtSecret) as { id: number; username: string; roleId: number };
-  const token = signAccessToken(decoded);
+  const token = signAccessToken({ id: decoded.id, username: decoded.username, roleId: decoded.roleId });
   return { token };
 }
 

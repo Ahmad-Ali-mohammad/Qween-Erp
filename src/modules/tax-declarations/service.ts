@@ -31,7 +31,7 @@ function parsePositiveInt(value: unknown, fieldName: string): number {
   return n;
 }
 
-async function findOpenPostingPeriod(tx: Prisma.TransactionClient, date: Date) {
+async function findOpenPostingPeriod(tx: Prisma.TransactionClient, date: Date, label = 'التاريخ') {
   const period = await tx.accountingPeriod.findFirst({
     where: {
       startDate: { lte: date },
@@ -43,7 +43,7 @@ async function findOpenPostingPeriod(tx: Prisma.TransactionClient, date: Date) {
     include: { fiscalYear: true },
     orderBy: [{ fiscalYearId: 'desc' }, { number: 'asc' }]
   });
-  if (!period) throw Errors.business('لا توجد فترة محاسبية مفتوحة بتاريخ السداد');
+  if (!period) throw Errors.business(`لا توجد فترة محاسبية مفتوحة بتاريخ ${label}`);
   return period;
 }
 
@@ -65,6 +65,74 @@ export async function submitDeclaration(input: SubmitDeclarationInput) {
     const filedDate = input.filedDate ? parseDateOrThrow(input.filedDate, 'filedDate') : new Date();
     const filedReference = String(input.filedReference ?? `FILED-${declarationId}`).trim() || `FILED-${declarationId}`;
 
+    const outputTax = roundAmount(Number(declaration.outputTax ?? 0));
+    const inputTax = roundAmount(Number(declaration.inputTax ?? 0));
+    const offsetAmount = roundAmount(Math.min(outputTax, inputTax));
+
+    let journalEntry: { id: number; entryNumber: string } | null = null;
+    if (offsetAmount > 0) {
+      const reference = `TAX-DECL-${declarationId}`;
+      const existingEntry = await tx.journalEntry.findFirst({
+        where: { reference, status: 'POSTED' },
+        orderBy: { id: 'desc' },
+        select: { id: true, entryNumber: true }
+      });
+
+      if (existingEntry) {
+        journalEntry = existingEntry;
+      } else {
+        const period = await findOpenPostingPeriod(tx, filedDate, 'الإقرار');
+        const accounts = await resolvePostingAccounts(tx as any);
+        const year = filedDate.getUTCFullYear();
+        const count = await tx.journalEntry.count({ where: { entryNumber: { startsWith: `TAX-${year}-` } } });
+        const entryNumber = buildSequentialNumber('TAX', count, year);
+
+        const lines = [
+          {
+            lineNumber: 1,
+            accountId: accounts.vatLiabilityAccountId,
+            debit: offsetAmount,
+            credit: 0,
+            description: `تسوية ضريبة المخرجات لإقرار ${declarationId}`
+          },
+          {
+            lineNumber: 2,
+            accountId: accounts.vatRecoverableAccountId,
+            debit: 0,
+            credit: offsetAmount,
+            description: `تسوية ضريبة المدخلات لإقرار ${declarationId}`
+          }
+        ];
+
+        const entry = await tx.journalEntry.create({
+          data: {
+            entryNumber,
+            date: filedDate,
+            periodId: period.id,
+            description: `تسوية إقرار ضريبي رقم ${declarationId}`,
+            reference,
+            source: 'MANUAL',
+            status: 'POSTED',
+            totalDebit: offsetAmount,
+            totalCredit: offsetAmount,
+            createdById: input.userId,
+            postedById: input.userId,
+            postedAt: new Date(),
+            lines: { create: lines }
+          }
+        });
+
+        await applyLedgerLines(
+          tx as unknown as Prisma.TransactionClient,
+          filedDate,
+          period.number,
+          lines.map((line) => ({ accountId: line.accountId, debit: line.debit, credit: line.credit }))
+        );
+
+        journalEntry = { id: entry.id, entryNumber: entry.entryNumber };
+      }
+    }
+
     const updated = await tx.taxDeclaration.update({
       where: { id: declarationId },
       data: {
@@ -79,7 +147,9 @@ export async function submitDeclaration(input: SubmitDeclarationInput) {
 
     return {
       duplicate: false,
-      declaration: updated
+      declaration: updated,
+      journalEntryId: journalEntry?.id ?? null,
+      journalEntryNumber: journalEntry?.entryNumber ?? null
     };
   });
 }
@@ -113,7 +183,7 @@ export async function payDeclaration(input: PayDeclarationInput) {
     if (payable <= 0) throw Errors.business('صافي الضريبة المستحقة يجب أن يكون أكبر من صفر');
 
     const paidDate = input.paidDate ? parseDateOrThrow(input.paidDate, 'paidDate') : new Date();
-    const period = await findOpenPostingPeriod(tx, paidDate);
+    const period = await findOpenPostingPeriod(tx, paidDate, 'السداد');
     const postingAccounts = await resolvePostingAccounts(tx as any);
 
     const cashAccountId = input.cashAccountId ? parsePositiveInt(input.cashAccountId, 'cashAccountId') : postingAccounts.cashAccountId;

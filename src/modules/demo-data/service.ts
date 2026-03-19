@@ -110,7 +110,7 @@ function buildDefaultDemoData(baseYear: number): DemoDataFile {
 
   return {
     version: '1.0.0',
-    currency: 'SAR',
+    currency: 'KWD',
     years,
     customersCount: 18,
     suppliersCount: 12,
@@ -150,7 +150,7 @@ function normalizeDemoData(raw: unknown): DemoDataFile {
 
   return {
     version: String(obj.version || '1.0.0'),
-    currency: String(obj.currency || 'SAR'),
+    currency: String(obj.currency || 'KWD'),
     years,
     customersCount: Math.max(3, Number(obj.customersCount || 12)),
     suppliersCount: Math.max(2, Number(obj.suppliersCount || 8)),

@@ -55,7 +55,12 @@ router.post('/:id/submit', requirePermissions(PERMISSIONS.TAX_WRITE), async (req
     filedDate: req.body?.filedDate,
     filedReference: req.body?.filedReference
   });
-  ok(res, { ...result.declaration, duplicate: result.duplicate });
+  ok(res, {
+    ...result.declaration,
+    duplicate: result.duplicate,
+    journalEntryId: result.journalEntryId ?? null,
+    journalEntryNumber: result.journalEntryNumber ?? null
+  });
 });
 
 router.post('/:id/pay', requirePermissions(PERMISSIONS.TAX_WRITE), async (req: any, res) => {

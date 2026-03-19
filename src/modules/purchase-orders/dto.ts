@@ -11,6 +11,8 @@ export const purchaseOrderLineSchema = z.object({
 
 export const createPurchaseOrderSchema = z.object({
   supplierId: z.coerce.number().int().positive(),
+  branchId: z.coerce.number().int().positive().optional(),
+  projectId: z.coerce.number().int().positive().optional(),
   date: z.string().optional(),
   expectedDate: z.string().optional(),
   notes: z.string().optional(),

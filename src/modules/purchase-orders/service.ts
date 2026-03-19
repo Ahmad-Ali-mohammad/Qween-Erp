@@ -1,7 +1,7 @@
 import { prisma } from '../../config/database';
 import { parseDateOrThrow } from '../../utils/date';
-import { buildSequentialNumber } from '../../utils/id-generator';
 import { Errors } from '../../utils/response';
+import { reserveNextSequence, reserveNextSequenceInDb } from '../numbering/service';
 
 function calcLines(lines: any[]) {
   let subtotal = 0;
@@ -37,26 +37,44 @@ function calcLines(lines: any[]) {
   return { mapped, subtotal, discount, taxAmount, total: subtotal - discount + taxAmount };
 }
 
-async function generatePurchaseOrderNumber(): Promise<string> {
-  const year = new Date().getUTCFullYear();
-  const count = await prisma.purchaseOrder.count({
-    where: {
-      date: { gte: new Date(Date.UTC(year, 0, 1)), lt: new Date(Date.UTC(year + 1, 0, 1)) }
+async function ensureOptionalRefs(data: any) {
+  if (data.branchId) {
+    const branch = await prisma.branch.findUnique({ where: { id: Number(data.branchId) } });
+    if (!branch) throw Errors.validation('الفرع غير موجود');
+  }
+
+  const supplier = await prisma.supplier.findUnique({ where: { id: Number(data.supplierId) } });
+  if (!supplier) throw Errors.validation('المورد غير موجود');
+
+  if (data.projectId) {
+    const project = await prisma.project.findUnique({ where: { id: Number(data.projectId) } });
+    if (!project) throw Errors.validation('المشروع غير موجود');
+    if (data.branchId && project.branchId && Number(project.branchId) !== Number(data.branchId)) {
+      throw Errors.validation('المشروع لا يتبع الفرع المحدد');
     }
+  }
+}
+
+async function generatePurchaseOrderNumber(branchId?: number | null, date?: string | Date): Promise<string> {
+  const sequence = await reserveNextSequence({
+    documentType: 'PO',
+    branchId: branchId ?? null,
+    date
   });
-  return buildSequentialNumber('PO', count, year);
+  return sequence.number;
 }
 
 export async function createPurchaseOrder(data: any) {
-  const supplier = await prisma.supplier.findUnique({ where: { id: Number(data.supplierId) } });
-  if (!supplier) throw Errors.validation('المورد غير موجود');
+  await ensureOptionalRefs(data);
   const calc = calcLines(data.lines || []);
-  const number = await generatePurchaseOrderNumber();
+  const number = await generatePurchaseOrderNumber(data.branchId, data.date);
 
   return prisma.$transaction(async (tx) => {
     const order = await tx.purchaseOrder.create({
       data: {
         number,
+        branchId: data.branchId ? Number(data.branchId) : null,
+        projectId: data.projectId ? Number(data.projectId) : null,
         supplierId: Number(data.supplierId),
         date: data.date ? parseDateOrThrow(data.date) : new Date(),
         expectedDate: data.expectedDate ? parseDateOrThrow(data.expectedDate, 'expectedDate') : null,
@@ -89,6 +107,7 @@ export async function updatePurchaseOrder(id: number, data: any) {
   const current = await prisma.purchaseOrder.findUnique({ where: { id } });
   if (!current) throw Errors.notFound('طلب الشراء غير موجود');
   if (current.status === 'CONVERTED') throw Errors.business('لا يمكن تعديل طلب شراء محول');
+  await ensureOptionalRefs({ ...current, ...data, supplierId: data.supplierId ?? current.supplierId });
 
   return prisma.$transaction(async (tx) => {
     const linesPayload = data.lines ?? (await tx.purchaseOrderLine.findMany({ where: { purchaseOrderId: id } }));
@@ -97,6 +116,8 @@ export async function updatePurchaseOrder(id: number, data: any) {
     const updated = await tx.purchaseOrder.update({
       where: { id },
       data: {
+        branchId: data.branchId !== undefined ? (data.branchId ? Number(data.branchId) : null) : current.branchId,
+        projectId: data.projectId !== undefined ? (data.projectId ? Number(data.projectId) : null) : current.projectId,
         supplierId: data.supplierId ? Number(data.supplierId) : current.supplierId,
         date: data.date ? parseDateOrThrow(data.date) : current.date,
         expectedDate: data.expectedDate ? parseDateOrThrow(data.expectedDate, 'expectedDate') : current.expectedDate,
@@ -162,36 +183,20 @@ export async function convertPurchaseOrder(id: number, userId: number) {
     const lines = await tx.purchaseOrderLine.findMany({ where: { purchaseOrderId: id }, orderBy: { id: 'asc' } });
     if (!lines.length) throw Errors.business('لا يمكن تحويل طلب شراء بدون بنود');
 
-    const invoiceDate = new Date();
-    const year = invoiceDate.getUTCFullYear();
-    const month = String(invoiceDate.getUTCMonth() + 1).padStart(2, '0');
-    const sequencePrefix = `PINV-${year}-${month}-`;
-
-    await tx.$executeRawUnsafe('LOCK TABLE "Invoice" IN EXCLUSIVE MODE');
-    const existingInvoices = await tx.invoice.findMany({
-      where: {
-        type: 'PURCHASE',
-        number: { startsWith: sequencePrefix }
-      },
-      select: { number: true }
-    });
-
-    let maxSequence = 0;
-    for (const row of existingInvoices) {
-      const sequence = Number.parseInt(String(row.number).slice(sequencePrefix.length), 10);
-      if (Number.isInteger(sequence) && sequence > maxSequence) {
-        maxSequence = sequence;
-      }
-    }
-
-    const invoiceNumber = `${sequencePrefix}${String(maxSequence + 1).padStart(5, '0')}`;
+    const invoiceNumber = (
+      await reserveNextSequenceInDb(tx, {
+        documentType: 'PINV',
+        branchId: current.branchId,
+        date: current.date
+      })
+    ).number;
 
     const taxableAmount = Number(current.subtotal) - Number(current.discount);
     const invoice = await tx.invoice.create({
       data: {
         number: invoiceNumber,
         type: 'PURCHASE',
-        date: invoiceDate,
+        date: new Date(),
         dueDate: current.expectedDate,
         supplierId: current.supplierId,
         subtotal: current.subtotal,
@@ -235,6 +240,10 @@ export async function listPurchaseOrders(query: any) {
   const skip = (page - 1) * limit;
   const where: any = {};
   if (query.supplierId) where.supplierId = Number(query.supplierId);
+  if (query.branchId) where.branchId = Number(query.branchId);
+  else if (Array.isArray(query.branchIds) && query.branchIds.length) where.branchId = { in: query.branchIds.map(Number) };
+  if (query.projectId) where.projectId = Number(query.projectId);
+  else if (Array.isArray(query.projectIds) && query.projectIds.length) where.projectId = { in: query.projectIds.map(Number) };
   if (query.status) where.status = query.status;
 
   const [rows, total] = await Promise.all([

@@ -1,0 +1,4 @@
+interface:
+  display_name: "ERP Qween Dev"
+  short_description: "ERP Qween modular ERP development guardrails"
+  default_prompt: "Use $erp-qween-development to implement ERP Qween changes with modular architecture, shared-database ownership, tests, and Arabic-first documentation."

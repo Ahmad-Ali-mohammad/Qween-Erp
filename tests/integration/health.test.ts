@@ -7,5 +7,9 @@ describe('Health API', () => {
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
     expect(res.body.data.status).toBe('OK');
+    expect(res.body.data.observability.sentry).toMatchObject({
+      configured: false,
+      enabled: false
+    });
   });
 });

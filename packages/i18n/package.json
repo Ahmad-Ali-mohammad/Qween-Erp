@@ -1,0 +1,13 @@
+{
+  "name": "@erp-qween/i18n",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@erp-qween/domain-types": "0.1.0",
+    "@erp-qween/app-config": "0.1.0"
+  }
+}

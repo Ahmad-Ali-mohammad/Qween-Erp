@@ -1,50 +1,136 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="ar" dir="rtl">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>ERP Qween</title>
-  <link rel="stylesheet" href="/styles/tokens.css" />
-  <link rel="stylesheet" href="/styles/base.css" />
-  <link rel="stylesheet" href="/styles/layout.css" />
-  <link rel="stylesheet" href="/styles/components.css" />
+  <title>ERP Qween Legacy Gateway</title>
+  <style>
+    :root {
+      font-family: "IBM Plex Sans Arabic", "IBM Plex Sans", "Segoe UI", sans-serif;
+      color: #102033;
+      background:
+        radial-gradient(circle at top left, rgba(15, 118, 110, 0.18), transparent 30%),
+        radial-gradient(circle at bottom right, rgba(180, 83, 9, 0.14), transparent 28%),
+        linear-gradient(135deg, #eef6f4 0%, #f8f3e8 45%, #fbfcfd 100%);
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      min-height: 100%;
+    }
+
+    body {
+      margin: 0;
+      min-width: 320px;
+    }
+
+    .legacy-root {
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      padding: 2rem;
+    }
+
+    .legacy-panel {
+      width: min(760px, 100%);
+      display: grid;
+      gap: 1rem;
+      padding: 2rem;
+      border-radius: 32px;
+      border: 1px solid rgba(148, 163, 184, 0.22);
+      background: rgba(255, 255, 255, 0.84);
+      box-shadow: 0 28px 70px rgba(15, 23, 42, 0.10);
+      backdrop-filter: blur(18px);
+    }
+
+    .badge {
+      display: inline-flex;
+      width: fit-content;
+      padding: 0.45rem 0.9rem;
+      border-radius: 999px;
+      background: rgba(180, 83, 9, 0.12);
+      color: #9a3412;
+      font-size: 0.82rem;
+      font-weight: 700;
+    }
+
+    .eyebrow {
+      margin: 0;
+      color: #0f766e;
+      font-size: 0.82rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(2rem, 5vw, 3.4rem);
+      line-height: 1.05;
+    }
+
+    p {
+      margin: 0;
+      color: #475569;
+      font-size: 1rem;
+      line-height: 1.7;
+    }
+
+    .timer {
+      display: inline-flex;
+      width: fit-content;
+      padding: 0.8rem 1rem;
+      border-radius: 18px;
+      background: rgba(15, 118, 110, 0.08);
+      color: #0f172a;
+      font-weight: 700;
+    }
+
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.85rem;
+    }
+
+    .link {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0.95rem 1.15rem;
+      border-radius: 18px;
+      text-decoration: none;
+      border: 1px solid rgba(15, 118, 110, 0.14);
+      background: rgba(255, 255, 255, 0.90);
+      color: #0f172a;
+      transition: transform 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+    }
+
+    .link:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 14px 32px rgba(15, 23, 42, 0.08);
+      background: rgba(240, 253, 250, 0.95);
+    }
+
+    @media (max-width: 700px) {
+      .legacy-root { padding: 1rem; }
+      .legacy-panel { padding: 1.5rem; }
+      .actions { flex-direction: column; }
+    }
+  </style>
 </head>
 <body>
-  <div id="app-shell">
-    <aside class="sidebar hidden" id="sidebar" hidden>
-      <div class="brand">
-        <h1>ERP SYSTEM</h1>
-        <p>شركة واحدة</p>
-      </div>
-      <nav id="main-nav" aria-label="التنقل الرئيسي"></nav>
-      <button id="logout-btn" class="btn btn-danger hidden" type="button" hidden>تسجيل الخروج</button>
-    </aside>
-
-    <main class="content">
-      <header class="topbar card compact hidden" hidden>
-        <div class="topbar-title">
-          <button id="menu-toggle" class="btn btn-secondary mobile-only" type="button">القائمة</button>
-          <h2 id="page-title">لوحة التحكم</h2>
-        </div>
-        <div class="user-badge" id="user-badge">يرجى تسجيل الدخول</div>
-      </header>
-      <section id="view"></section>
-    </main>
-  </div>
-
-  <div id="toast" class="toast"></div>
-
-  <dialog id="confirm-dialog" class="confirm-dialog">
-    <form method="dialog" class="confirm-content">
-      <h3 id="confirm-title">تأكيد</h3>
-      <p id="confirm-message">هل أنت متأكد؟</p>
-      <div class="actions">
-        <button class="btn btn-secondary" value="cancel" type="submit">إلغاء</button>
-        <button class="btn btn-danger" id="confirm-ok" value="ok" type="submit">تأكيد</button>
-      </div>
-    </form>
-  </dialog>
-
+  <main class="legacy-root">
+    <section class="legacy-panel">
+      <span class="badge" id="legacy-badge"></span>
+      <p class="eyebrow" id="legacy-eyebrow"></p>
+      <h1 id="legacy-title"></h1>
+      <p id="legacy-description"></p>
+      <div class="timer" id="legacy-timer"></div>
+      <p id="legacy-note"></p>
+      <div class="actions" id="legacy-actions"></div>
+    </section>
+  </main>
   <script type="module" src="/js/app.js"></script>
 </body>
 </html>

@@ -2,8 +2,32 @@
 import type { ApiFailure, ApiSuccess } from '../types/api';
 import { ERROR_CODES, type ErrorCode } from '../constants/error-codes';
 
-export function ok<T>(res: Response, data: T, meta?: Record<string, unknown>, status = 200): Response<ApiSuccess<T>> {
-  return res.status(status).json({ success: true, data, ...(meta ? { meta } : {}) });
+type SuccessEnvelope = {
+  status?: {
+    code: string;
+    message?: string;
+  };
+  validationErrors?: unknown;
+  postingRefs?: unknown;
+  auditRef?: number | null;
+};
+
+export function ok<T>(
+  res: Response,
+  data: T,
+  meta?: Record<string, unknown>,
+  status = 200,
+  envelope?: SuccessEnvelope
+): Response<ApiSuccess<T>> {
+  return res.status(status).json({
+    success: true,
+    status: envelope?.status ?? { code: 'OK' },
+    data,
+    ...(meta ? { meta } : {}),
+    ...(envelope?.validationErrors !== undefined ? { validationErrors: envelope.validationErrors } : {}),
+    ...(envelope?.postingRefs !== undefined ? { postingRefs: envelope.postingRefs } : {}),
+    ...(envelope?.auditRef !== undefined ? { auditRef: envelope.auditRef } : {})
+  });
 }
 
 export function fail(
@@ -15,7 +39,9 @@ export function fail(
 ): Response<ApiFailure> {
   return res.status(status).json({
     success: false,
-    error: { code, message, ...(details !== undefined ? { details } : {}) }
+    status: { code, message },
+    error: { code, message, ...(details !== undefined ? { details } : {}) },
+    ...(code === ERROR_CODES.VALIDATION_ERROR ? { validationErrors: details } : {})
   });
 }
 

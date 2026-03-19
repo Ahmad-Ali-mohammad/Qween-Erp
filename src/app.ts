@@ -5,14 +5,45 @@ import helmet from 'helmet';
 import morgan from 'morgan';
 import rateLimit from 'express-rate-limit';
 import cookieParser from 'cookie-parser';
+import { existsSync } from 'fs';
 import path from 'path';
 import { env } from './config/env';
 import apiRoutes from './routes';
 import { ok } from './utils/response';
+import { ERROR_CODES } from './constants/error-codes';
 import { errorMiddleware } from './middleware/error';
 import { notFound } from './middleware/not-found';
+import { getPrintingQueueCapabilities } from './modules/printing/queue';
+import { getSyncQueueCapabilities } from './modules/sync/queue';
+import { getMetricsContentType, metricsMiddleware, renderMetrics } from './observability/metrics';
+import { getSentryCapabilities, initializeSentry } from './observability/sentry';
+import { getFileStorageCapabilities } from './services/file-storage';
+import { CENTRAL_SYSTEMS } from './modules/central/catalog';
+
+initializeSentry();
 
 export const app = express();
+
+function mountWorkspaceFrontends() {
+  for (const system of CENTRAL_SYSTEMS) {
+    const distDir = path.join(process.cwd(), 'apps', system.appDir, 'dist');
+    const indexFile = path.join(distDir, 'index.html');
+
+    if (!existsSync(indexFile)) {
+      continue;
+    }
+
+    app.use(system.routeBase, express.static(distDir, { redirect: false }));
+
+    app.get(system.routeBase, (_req, res) => {
+      res.sendFile(indexFile);
+    });
+
+    app.get(`${system.routeBase}/*`, (_req, res) => {
+      res.sendFile(indexFile);
+    });
+  }
+}
 
 app.use(helmet());
 app.use(cors({ origin: true, credentials: true }));
@@ -20,6 +51,7 @@ app.use(cookieParser());
 app.use(express.json({ limit: '5mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(morgan(env.nodeEnv === 'production' ? 'combined' : 'dev'));
+app.use(metricsMiddleware);
 
 const limiter = rateLimit({
   windowMs: env.rateLimitWindow * 60 * 1000,
@@ -41,21 +73,91 @@ const limiter = rateLimit({
         message: `Too many requests. Retry after ${retryAfterSeconds}s`
       }
     });
-  }
+  },
+  skip: (req) => ['/health', '/v1/health', '/metrics', '/v1/metrics'].includes(req.path)
+    || env.nodeEnv === 'test'
 });
 app.use('/api', limiter);
 
-app.get('/api/health', (_req, res) => {
+const healthHandler = (_req: express.Request, res: express.Response) => {
   ok(res, {
     status: 'OK',
     timestamp: new Date().toISOString(),
     environment: env.nodeEnv,
-    uptime: process.uptime()
+    uptime: process.uptime(),
+    timezone: env.appTimezone,
+    locale: env.appLocale,
+    baseCurrency: env.baseCurrency,
+    observability: {
+      metricsEnabled: env.metricsEnabled,
+      metricsProtected: Boolean(env.metricsToken),
+      sentry: getSentryCapabilities(),
+      queue: {
+        sync: getSyncQueueCapabilities(),
+        printing: getPrintingQueueCapabilities()
+      },
+      storage: getFileStorageCapabilities()
+    }
   });
-});
+};
 
+const metricsHandler = async (req: express.Request, res: express.Response) => {
+  if (!env.metricsEnabled) {
+    res.status(404).json({
+      success: false,
+      status: {
+        code: ERROR_CODES.NOT_FOUND,
+        message: 'Metrics endpoint is disabled'
+      },
+      error: {
+        code: ERROR_CODES.NOT_FOUND,
+        message: 'Metrics endpoint is disabled'
+      }
+    });
+    return;
+  }
+
+  if (env.metricsToken) {
+    const bearerToken = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+    const headerToken = String(req.headers['x-metrics-token'] || '');
+
+    if (bearerToken !== env.metricsToken && headerToken !== env.metricsToken) {
+      res.status(401).json({
+        success: false,
+        status: {
+          code: ERROR_CODES.UNAUTHORIZED,
+          message: 'Metrics token is required'
+        },
+        error: {
+          code: ERROR_CODES.UNAUTHORIZED,
+          message: 'Metrics token is required'
+        }
+      });
+      return;
+    }
+  }
+
+  res.setHeader('Content-Type', getMetricsContentType());
+  res.send(await renderMetrics());
+};
+
+app.get('/api/health', healthHandler);
+app.get('/api/v1/health', healthHandler);
+app.get('/api/metrics', metricsHandler);
+app.get('/api/v1/metrics', metricsHandler);
+app.get('/health', healthHandler);
+app.get('/v1/health', healthHandler);
+app.get('/metrics', metricsHandler);
+app.get('/v1/metrics', metricsHandler);
+
+app.use('/api/v1', apiRoutes);
 app.use('/api', apiRoutes);
 
+mountWorkspaceFrontends();
+
+app.get('/', (_req, res) => {
+  res.redirect(302, '/portal');
+});
 app.use(express.static(path.join(process.cwd(), 'frontend')));
 app.get('*', (req, res, next) => {
   if (req.path.startsWith('/api')) {

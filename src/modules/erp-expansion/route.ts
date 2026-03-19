@@ -8,9 +8,7 @@ import { validateBody } from '../../middleware/validate';
 import { audit } from '../../middleware/audit';
 import { PERMISSIONS } from '../../constants/permissions';
 import { ok, Errors } from '../../utils/response';
-import { buildSequentialNumber } from '../../utils/id-generator';
-import { applyLedgerLines } from '../shared/ledger';
-import { resolvePostingAccounts } from '../shared/posting-accounts';
+import { approveStockCount } from '../inventory/service';
 
 type ModelDelegate = {
   findMany: (args: Record<string, unknown>) => Promise<unknown[]>;
@@ -95,7 +93,11 @@ function buildStrictModelSchema(model: string, mode: 'create' | 'update') {
     if (field.name === 'id' || field.name === 'createdAt' || field.name === 'updatedAt') continue;
     const schema = fieldSchema(field);
     if (!schema) continue;
-    shape[field.name] = schema;
+    if (mode === 'create' && field.hasDefaultValue && field.isRequired) {
+      shape[field.name] = schema.optional();
+    } else {
+      shape[field.name] = schema;
+    }
   }
 
   let schema = z.object(shape).strict();
@@ -323,170 +325,13 @@ const resources: ResourceConfig[] = [
 
 resources.forEach(registerCrudResource);
 
-router.post('/stock-counts/:id/approve', requirePermissions(PERMISSIONS.INVENTORY_WRITE), audit('stock_counts'), async (req: any, res: Response) => {
-  const id = parseIdParam(req);
-
-  const approved = await prisma.$transaction(async (tx) => {
-    const countDoc = await tx.stockCount.findUnique({ where: { id } });
-    if (!countDoc) throw Errors.notFound('جرد المخزون غير موجود');
-    if (countDoc.status !== 'DRAFT') throw Errors.business('يمكن اعتماد جرد مسودة فقط');
-
-    const lines = await tx.stockCountLine.findMany({ where: { stockCountId: id } });
-    const adjustmentLines: Array<{ accountId: number; debit: number; credit: number; description: string }> = [];
-    const postingAccounts = await resolvePostingAccounts(tx);
-
-    for (const line of lines) {
-      const theoreticalQty = Number(line.theoreticalQty ?? 0);
-      const actualQty = Number(line.actualQty ?? 0);
-      const differenceQty = actualQty - theoreticalQty;
-      const unitCost = Number(line.unitCost ?? 0);
-      const differenceValue = differenceQty * unitCost;
-
-      await tx.stockCountLine.update({
-        where: { id: line.id },
-        data: {
-          differenceQty,
-          differenceValue
-        }
-      });
-
-      if (differenceQty === 0) continue;
-
-      await tx.stockMovement.create({
-        data: {
-          date: countDoc.date,
-          type: 'ADJUSTMENT',
-          reference: countDoc.number,
-          itemId: line.itemId,
-          warehouseId: countDoc.warehouseId,
-          quantity: differenceQty,
-          unitCost,
-          totalCost: differenceValue,
-          notes: `اعتماد جرد ${countDoc.number}`
-        }
-      });
-
-      const existing = await tx.stockBalance.findFirst({
-        where: {
-          itemId: line.itemId,
-          warehouseId: countDoc.warehouseId,
-          locationId: null
-        }
-      });
-      const nextQty = Number(existing?.quantity ?? 0) + differenceQty;
-      const nextValue = Number(existing?.value ?? 0) + differenceValue;
-      const nextAvgCost = Math.abs(nextQty) < 0.000001 ? 0 : nextValue / nextQty;
-
-      if (existing) {
-        await tx.stockBalance.update({
-          where: { id: existing.id },
-          data: {
-            quantity: nextQty,
-            value: nextValue,
-            avgCost: nextAvgCost
-          }
-        });
-      } else {
-        await tx.stockBalance.create({
-          data: {
-            itemId: line.itemId,
-            warehouseId: countDoc.warehouseId,
-            locationId: null,
-            quantity: nextQty,
-            value: nextValue,
-            avgCost: nextAvgCost
-          }
-        });
-      }
-
-      await tx.item.update({
-        where: { id: line.itemId },
-        data: {
-          onHandQty: { increment: differenceQty },
-          inventoryValue: { increment: differenceValue }
-        }
-      });
-
-      if (differenceValue > 0) {
-        adjustmentLines.push({
-          accountId: postingAccounts.inventoryAccountId,
-          debit: differenceValue,
-          credit: 0,
-          description: `تسوية جرد ${countDoc.number} - زيادة`
-        });
-        adjustmentLines.push({
-          accountId: postingAccounts.stockAdjustmentGainAccountId,
-          debit: 0,
-          credit: differenceValue,
-          description: `تسوية جرد ${countDoc.number} - زيادة`
-        });
-      } else if (differenceValue < 0) {
-        const amount = Math.abs(differenceValue);
-        adjustmentLines.push({
-          accountId: postingAccounts.stockAdjustmentLossAccountId,
-          debit: amount,
-          credit: 0,
-          description: `تسوية جرد ${countDoc.number} - عجز`
-        });
-        adjustmentLines.push({
-          accountId: postingAccounts.inventoryAccountId,
-          debit: 0,
-          credit: amount,
-          description: `تسوية جرد ${countDoc.number} - عجز`
-        });
-      }
-    }
-
-    if (adjustmentLines.length) {
-      const period = await tx.accountingPeriod.findFirst({
-        where: { startDate: { lte: countDoc.date }, endDate: { gte: countDoc.date }, status: 'OPEN', canPost: true },
-        include: { fiscalYear: true }
-      });
-      if (!period || period.fiscalYear.status !== 'OPEN') throw Errors.business('لا توجد فترة محاسبية مفتوحة');
-
-      const debit = adjustmentLines.reduce((s, l) => s + Number(l.debit), 0);
-      const credit = adjustmentLines.reduce((s, l) => s + Number(l.credit), 0);
-      const seq = await tx.journalEntry.count();
-      const entryNumber = buildSequentialNumber('STKJ', seq, new Date(countDoc.date).getUTCFullYear());
-
-      const entry = await tx.journalEntry.create({
-        data: {
-          entryNumber,
-          date: countDoc.date,
-          periodId: period.id,
-          description: `قيد تسوية جرد ${countDoc.number}`,
-          reference: countDoc.number,
-          source: 'MANUAL',
-          status: 'POSTED',
-          totalDebit: debit,
-          totalCredit: credit,
-          createdById: Number(req.user.id),
-          postedById: Number(req.user.id),
-          postedAt: new Date()
-        }
-      });
-
-      await tx.journalLine.createMany({
-        data: adjustmentLines.map((line, idx) => ({
-          entryId: entry.id,
-          lineNumber: idx + 1,
-          accountId: line.accountId,
-          description: line.description,
-          debit: line.debit,
-          credit: line.credit
-        }))
-      });
-
-      await applyLedgerLines(tx, countDoc.date, period.number, adjustmentLines);
-    }
-
-    return tx.stockCount.update({
-      where: { id },
-      data: { status: 'APPROVED' }
-    });
-  });
-
-  ok(res, approved);
+router.post('/stock-counts/:id/approve', requirePermissions(PERMISSIONS.INVENTORY_WRITE), audit('stock_counts'), async (req: any, res: Response, next) => {
+  try {
+    const id = parseIdParam(req);
+    ok(res, await approveStockCount(id, Number(req.user.id)));
+  } catch (error) {
+    next(error);
+  }
 });
 
 router.get('/backups', requirePermissions(PERMISSIONS.BACKUP_READ), async (req: Request, res: Response) => {
@@ -764,7 +609,7 @@ router.put(
       isEnabled: true,
       status: 'ACTIVE',
       settings: {
-        baseCurrency: req.body.baseCurrency ?? 'SAR',
+        baseCurrency: req.body.baseCurrency ?? 'KWD',
         tolerancePercent: req.body.tolerancePercent ?? 0,
         autoPost: req.body.autoPost ?? false,
         ...(req.body.settings ?? {})
@@ -870,3 +715,5 @@ router.post('/year-close/opening-entry', requirePermissions(PERMISSIONS.FISCAL_W
 });
 
 export default router;
+
+

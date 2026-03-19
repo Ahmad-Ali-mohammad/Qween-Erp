@@ -34,7 +34,12 @@ export async function authenticate(req: AuthRequest, res: Response, next: NextFu
     const decoded = jwt.verify(token, env.jwtSecret) as TokenPayload;
     const user = await prisma.user.findUnique({
       where: { id: decoded.id },
-      include: { role: true }
+      include: {
+        role: true,
+        branchAccesses: { select: { branchId: true, canRead: true, canWrite: true } },
+        projectAccesses: { select: { projectId: true, canRead: true, canWrite: true } },
+        warehouseAccesses: { select: { warehouseId: true, canRead: true, canWrite: true } }
+      }
     });
 
     if (!user || !user.isActive) {
@@ -46,7 +51,14 @@ export async function authenticate(req: AuthRequest, res: Response, next: NextFu
       id: user.id,
       username: user.username,
       roleId: user.roleId,
-      permissions: (user.role.permissions ?? {}) as Record<string, boolean>
+      permissions: (user.role.permissions ?? {}) as Record<string, boolean>,
+      defaultBranchId: (user as any).defaultBranchId ?? null,
+      branchIds: user.branchAccesses.filter((row) => row.canRead || row.canWrite).map((row) => row.branchId),
+      branchWriteIds: user.branchAccesses.filter((row) => row.canWrite).map((row) => row.branchId),
+      projectIds: user.projectAccesses.filter((row) => row.canRead || row.canWrite).map((row) => row.projectId),
+      projectWriteIds: user.projectAccesses.filter((row) => row.canWrite).map((row) => row.projectId),
+      warehouseIds: user.warehouseAccesses.filter((row) => row.canRead || row.canWrite).map((row) => row.warehouseId),
+      warehouseWriteIds: user.warehouseAccesses.filter((row) => row.canWrite).map((row) => row.warehouseId)
     };
 
     next();
