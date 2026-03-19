@@ -13,8 +13,8 @@ export async function renderQuickJournal() {
       request('/journals?page=1&limit=10')
     ]);
 
-    const postingAccounts = extractRows(accountsRes).filter((a) => a.allowPosting && a.isActive);
-    const openPeriods = extractRows(periodsRes).filter((p) => p.status === 'OPEN' && p.canPost);
+    const postingAccounts = extractRows(accountsRes).filter((account) => account.allowPosting && account.isActive);
+    const openPeriods = extractRows(periodsRes).filter((period) => period.status === 'OPEN' && period.canPost);
     const recent = extractRows(journalsRes);
 
     view.innerHTML = `
@@ -25,7 +25,7 @@ export async function renderQuickJournal() {
           <div><label>الفترة المحاسبية</label>
             <select id="qj-periodId">
               <option value="">بدون تحديد</option>
-              ${openPeriods.map((p) => `<option value="${p.id}">${p.fiscalYear?.name || ''} - ${p.name}</option>`).join('')}
+              ${openPeriods.map((period) => `<option value="${period.id}">${period.fiscalYear?.name || ''} - ${period.name}</option>`).join('')}
             </select>
           </div>
           <div><label>المرجع</label><input id="qj-ref" placeholder="REF-001" /></div>
@@ -33,13 +33,13 @@ export async function renderQuickJournal() {
           <div><label>الحساب المدين</label>
             <select id="qj-debit" required>
               <option value="">اختر الحساب</option>
-              ${postingAccounts.map((a) => `<option value="${a.id}">${a.code} - ${a.nameAr}</option>`).join('')}
+              ${postingAccounts.map((account) => `<option value="${account.id}">${account.code} - ${account.nameAr}</option>`).join('')}
             </select>
           </div>
           <div><label>الحساب الدائن</label>
             <select id="qj-credit" required>
               <option value="">اختر الحساب</option>
-              ${postingAccounts.map((a) => `<option value="${a.id}">${a.code} - ${a.nameAr}</option>`).join('')}
+              ${postingAccounts.map((account) => `<option value="${account.id}">${account.code} - ${account.nameAr}</option>`).join('')}
             </select>
           </div>
           <div><label>المبلغ</label><input id="qj-amount" type="number" min="0.01" step="0.01" value="0" required /></div>
@@ -53,20 +53,20 @@ export async function renderQuickJournal() {
       <div class="card">
         <h3>آخر القيود</h3>
         ${table(
-      ['رقم القيد', 'التاريخ', 'البيان', 'مدين', 'دائن', 'الحالة'],
-      recent.map((j) => [
-        j.entryNumber,
-        formatDate(j.date),
-        j.description || '-',
-        formatMoney(j.totalDebit),
-        formatMoney(j.totalCredit),
-        statusBadge(j.status)
-      ])
-    )}
+          ['رقم القيد', 'التاريخ', 'البيان', 'مدين', 'دائن', 'الحالة'],
+          recent.map((journal) => [
+            journal.entryNumber,
+            formatDate(journal.date),
+            journal.description || '-',
+            formatMoney(journal.totalDebit),
+            formatMoney(journal.totalCredit),
+            statusBadge(journal.status)
+          ])
+        )}
       </div>
     `;
 
-    document.getElementById('quick-journal-form').addEventListener('submit', async (event) => {
+    document.getElementById('quick-journal-form')?.addEventListener('submit', async (event) => {
       event.preventDefault();
       const debitId = Number(document.getElementById('qj-debit').value || 0);
       const creditId = Number(document.getElementById('qj-credit').value || 0);
@@ -99,7 +99,7 @@ export async function renderQuickJournal() {
     });
 
     setPageActions({
-      onSave: () => document.getElementById('quick-journal-form').requestSubmit(),
+      onSave: () => document.getElementById('quick-journal-form')?.requestSubmit(),
       onRefresh: () => load()
     });
   };
@@ -112,9 +112,7 @@ export async function renderQuickInvoice() {
   const view = document.getElementById('view');
   view.innerHTML = '<div class="card">جاري تحميل شاشة الفاتورة السريعة...</div>';
 
-  const state = {
-    type: 'SALES'
-  };
+  const state = { type: 'SALES' };
 
   const load = async () => {
     let parties = [];
@@ -133,8 +131,6 @@ export async function renderQuickInvoice() {
       recent = extractRows(invoicesRes);
     } catch (error) {
       console.error('Error loading data:', error);
-      parties = [];
-      recent = [];
     }
 
     view.innerHTML = `
@@ -150,7 +146,7 @@ export async function renderQuickInvoice() {
           <div><label>${state.type === 'SALES' ? 'العميل' : 'المورد'}</label>
             <select id="qi-party" required>
               <option value="">اختر ${state.type === 'SALES' ? 'العميل' : 'المورد'}</option>
-              ${parties.map((p) => `<option value="${p.id}">${p.code} - ${p.nameAr}</option>`).join('')}
+              ${parties.map((party) => `<option value="${party.id}">${party.code} - ${party.nameAr}</option>`).join('')}
             </select>
           </div>
           <div><label>تاريخ الفاتورة</label><input id="qi-date" type="date" value="${new Date().toISOString().slice(0, 10)}" required /></div>
@@ -170,24 +166,24 @@ export async function renderQuickInvoice() {
       <div class="card">
         <h3>آخر الفواتير (${state.type === 'SALES' ? 'مبيعات' : 'مشتريات'})</h3>
         ${table(
-      ['رقم الفاتورة', 'التاريخ', state.type === 'SALES' ? 'العميل' : 'المورد', 'الإجمالي', 'الحالة'],
-      recent.map((i) => [
-        i.number,
-        formatDate(i.date),
-        i.customer?.nameAr || i.supplier?.nameAr || '-',
-        formatMoney(i.total),
-        statusBadge(i.status)
-      ])
-    )}
+          ['رقم الفاتورة', 'التاريخ', state.type === 'SALES' ? 'العميل' : 'المورد', 'الإجمالي', 'الحالة'],
+          recent.map((invoice) => [
+            invoice.number,
+            formatDate(invoice.date),
+            invoice.customer?.nameAr || invoice.supplier?.nameAr || '-',
+            formatMoney(invoice.total),
+            statusBadge(invoice.status)
+          ])
+        )}
       </div>
     `;
 
-    document.getElementById('qi-type').addEventListener('change', async (event) => {
+    document.getElementById('qi-type')?.addEventListener('change', async (event) => {
       state.type = event.target.value;
       await load();
     });
 
-    document.getElementById('quick-invoice-form').addEventListener('submit', async (event) => {
+    document.getElementById('quick-invoice-form')?.addEventListener('submit', async (event) => {
       event.preventDefault();
       const type = document.getElementById('qi-type').value;
       const partyId = Number(document.getElementById('qi-party').value || 0);
@@ -202,13 +198,15 @@ export async function renderQuickInvoice() {
         dueDate: document.getElementById('qi-due').value || undefined,
         customerId: type === 'SALES' ? partyId : undefined,
         supplierId: type === 'PURCHASE' ? partyId : undefined,
-        lines: [{
-          description: document.getElementById('qi-desc').value.trim(),
-          quantity: Number(document.getElementById('qi-qty').value || 0),
-          unitPrice: Number(document.getElementById('qi-price').value || 0),
-          discount: Number(document.getElementById('qi-discount').value || 0),
-          taxRate: Number(document.getElementById('qi-tax').value || 15)
-        }]
+        lines: [
+          {
+            description: document.getElementById('qi-desc').value.trim(),
+            quantity: Number(document.getElementById('qi-qty').value || 0),
+            unitPrice: Number(document.getElementById('qi-price').value || 0),
+            discount: Number(document.getElementById('qi-discount').value || 0),
+            taxRate: Number(document.getElementById('qi-tax').value || 15)
+          }
+        ]
       };
 
       if (!payload.lines[0].description || payload.lines[0].quantity <= 0) {
@@ -224,7 +222,7 @@ export async function renderQuickInvoice() {
     });
 
     setPageActions({
-      onSave: () => document.getElementById('quick-invoice-form').requestSubmit(),
+      onSave: () => document.getElementById('quick-invoice-form')?.requestSubmit(),
       onRefresh: () => load()
     });
   };
@@ -237,18 +235,12 @@ export async function renderQuickStatement() {
   const view = document.getElementById('view');
   view.innerHTML = '<div class="card">جاري تحميل شاشة كشف الحساب...</div>';
 
-  const state = {
-    type: 'ACCOUNT'
-  };
+  const state = { type: 'ACCOUNT' };
 
   const load = async () => {
-    const [accountsRes, customersRes, suppliersRes] = await Promise.all([
-      api('/accounts?page=1&limit=500'),
-      api('/customers'),
-      api('/suppliers')
-    ]);
+    const [accountsRes, customersRes, suppliersRes] = await Promise.all([api('/accounts?page=1&limit=500'), api('/customers'), api('/suppliers')]);
 
-    const accounts = extractRows(accountsRes).filter((a) => a.allowPosting);
+    const accounts = extractRows(accountsRes).filter((account) => account.allowPosting);
     const customers = extractRows(customersRes);
     const suppliers = extractRows(suppliersRes);
     const list = state.type === 'ACCOUNT' ? accounts : state.type === 'CUSTOMER' ? customers : suppliers;
@@ -267,7 +259,7 @@ export async function renderQuickStatement() {
           <div><label>العنصر</label>
             <select id="qs-id" required>
               <option value="">اختر العنصر</option>
-              ${list.map((x) => `<option value="${x.id}">${x.code} - ${x.nameAr}</option>`).join('')}
+              ${list.map((entry) => `<option value="${entry.id}">${entry.code} - ${entry.nameAr}</option>`).join('')}
             </select>
           </div>
           <div><label>من تاريخ</label><input id="qs-from" type="date" value="${new Date(new Date().getFullYear(), 0, 1).toISOString().slice(0, 10)}" /></div>
@@ -283,12 +275,12 @@ export async function renderQuickStatement() {
       </div>
     `;
 
-    document.getElementById('qs-type').addEventListener('change', async (event) => {
+    document.getElementById('qs-type')?.addEventListener('change', async (event) => {
       state.type = event.target.value;
       await load();
     });
 
-    document.getElementById('quick-statement-form').addEventListener('submit', async (event) => {
+    document.getElementById('quick-statement-form')?.addEventListener('submit', async (event) => {
       event.preventDefault();
       const id = Number(document.getElementById('qs-id').value || 0);
       if (!id) {
@@ -306,28 +298,30 @@ export async function renderQuickStatement() {
         panel.innerHTML = `
           <h3>كشف حساب: ${stmt.account?.code || ''} - ${stmt.account?.nameAr || ''}</h3>
           ${table(
-          ['التاريخ', 'رقم القيد', 'البيان', 'مدين', 'دائن', 'الرصيد'],
-          rows.map((r) => [formatDate(r.date), r.entryNumber, r.description || '-', formatMoney(r.debit), formatMoney(r.credit), formatMoney(r.balance)])
-        )}
+            ['التاريخ', 'رقم القيد', 'البيان', 'مدين', 'دائن', 'الرصيد'],
+            rows.map((row) => [formatDate(row.date), row.entryNumber, row.description || '-', formatMoney(row.debit), formatMoney(row.credit), formatMoney(row.balance)])
+          )}
         `;
         return;
       }
 
       const isCustomer = state.type === 'CUSTOMER';
-      const invoicesRes = await api(`/invoices${toQuery({
-        page: 1,
-        limit: 100,
-        type: isCustomer ? 'SALES' : 'PURCHASE',
-        customerId: isCustomer ? id : undefined,
-        supplierId: isCustomer ? undefined : id
-      })}`);
+      const invoicesRes = await api(
+        `/invoices${toQuery({
+          page: 1,
+          limit: 100,
+          type: isCustomer ? 'SALES' : 'PURCHASE',
+          customerId: isCustomer ? id : undefined,
+          supplierId: isCustomer ? undefined : id
+        })}`
+      );
       const paymentsRes = await api('/payments?page=1&limit=200');
 
       const invoices = extractRows(invoicesRes);
-      const payments = extractRows(paymentsRes).filter((p) => (isCustomer ? p.customerId === id : p.supplierId === id));
-      const invoiceTotal = invoices.reduce((s, i) => s + Number(i.total || 0), 0);
-      const paidTotal = payments.reduce((s, p) => s + Number(p.amount || 0), 0);
-      const outstanding = invoices.reduce((s, i) => s + Number(i.outstanding || 0), 0);
+      const payments = extractRows(paymentsRes).filter((payment) => (isCustomer ? payment.customerId === id : payment.supplierId === id));
+      const invoiceTotal = invoices.reduce((sum, invoice) => sum + Number(invoice.total || 0), 0);
+      const paidTotal = payments.reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
+      const outstanding = invoices.reduce((sum, invoice) => sum + Number(invoice.outstanding || 0), 0);
 
       panel.innerHTML = `
         <h3>كشف ${isCustomer ? 'العميل' : 'المورد'}</h3>
@@ -338,15 +332,22 @@ export async function renderQuickStatement() {
         </div>
         <div style="margin-top: 12px;">
           ${table(
-        ['رقم الفاتورة', 'التاريخ', 'الإجمالي', 'المدفوع', 'المتبقي', 'الحالة'],
-        invoices.map((i) => [i.number, formatDate(i.date), formatMoney(i.total), formatMoney(i.paidAmount), formatMoney(i.outstanding), statusBadge(i.status)])
-      )}
+            ['رقم الفاتورة', 'التاريخ', 'الإجمالي', 'المدفوع', 'المتبقي', 'الحالة'],
+            invoices.map((invoice) => [
+              invoice.number,
+              formatDate(invoice.date),
+              formatMoney(invoice.total),
+              formatMoney(invoice.paidAmount),
+              formatMoney(invoice.outstanding),
+              statusBadge(invoice.status)
+            ])
+          )}
         </div>
       `;
     });
 
     setPageActions({
-      onSearch: () => document.getElementById('qs-id').focus(),
+      onSearch: () => document.getElementById('qs-id')?.focus(),
       onRefresh: () => load()
     });
   };
@@ -388,51 +389,51 @@ export async function renderGlobalSearch() {
     ]);
 
     const contains = (text) => String(text || '').toLowerCase().includes(keyword);
-    const journals = extractRows(journalsRes).filter((x) => contains(x.entryNumber) || contains(x.description) || contains(x.reference));
-    const invoices = extractRows(invoicesRes).filter((x) => contains(x.number) || contains(x.notes) || contains(x.customer?.nameAr) || contains(x.supplier?.nameAr));
-    const payments = extractRows(paymentsRes).filter((x) => contains(x.number) || contains(x.description) || contains(x.customer?.nameAr) || contains(x.supplier?.nameAr));
-    const customers = extractRows(customersRes).filter((x) => contains(x.code) || contains(x.nameAr) || contains(x.mobile) || contains(x.email));
-    const suppliers = extractRows(suppliersRes).filter((x) => contains(x.code) || contains(x.nameAr) || contains(x.mobile) || contains(x.email));
-    const accounts = extractRows(accountsRes).filter((x) => contains(x.code) || contains(x.nameAr) || contains(x.nameEn));
+    const journals = extractRows(journalsRes).filter((row) => contains(row.entryNumber) || contains(row.description) || contains(row.reference));
+    const invoices = extractRows(invoicesRes).filter((row) => contains(row.number) || contains(row.notes) || contains(row.customer?.nameAr) || contains(row.supplier?.nameAr));
+    const payments = extractRows(paymentsRes).filter((row) => contains(row.number) || contains(row.description) || contains(row.customer?.nameAr) || contains(row.supplier?.nameAr));
+    const customers = extractRows(customersRes).filter((row) => contains(row.code) || contains(row.nameAr) || contains(row.mobile) || contains(row.email));
+    const suppliers = extractRows(suppliersRes).filter((row) => contains(row.code) || contains(row.nameAr) || contains(row.mobile) || contains(row.email));
+    const accounts = extractRows(accountsRes).filter((row) => contains(row.code) || contains(row.nameAr) || contains(row.nameEn));
 
     panel.innerHTML = `
       <h3>نتائج البحث عن: "${keyword}"</h3>
       <div class="grid-2">
         <div class="card compact">
           <h4>القيود (${journals.length})</h4>
-          <ul class="panel-list">${journals.slice(0, 10).map((j) => `<li>${j.entryNumber} - ${j.description || '-'}</li>`).join('') || '<li>لا يوجد</li>'}</ul>
+          <ul class="panel-list">${journals.slice(0, 10).map((row) => `<li>${row.entryNumber} - ${row.description || '-'}</li>`).join('') || '<li>لا يوجد</li>'}</ul>
         </div>
         <div class="card compact">
           <h4>الفواتير (${invoices.length})</h4>
-          <ul class="panel-list">${invoices.slice(0, 10).map((i) => `<li>${i.number} - ${formatMoney(i.total)}</li>`).join('') || '<li>لا يوجد</li>'}</ul>
+          <ul class="panel-list">${invoices.slice(0, 10).map((row) => `<li>${row.number} - ${formatMoney(row.total)}</li>`).join('') || '<li>لا يوجد</li>'}</ul>
         </div>
         <div class="card compact">
           <h4>المدفوعات (${payments.length})</h4>
-          <ul class="panel-list">${payments.slice(0, 10).map((p) => `<li>${p.number} - ${formatMoney(p.amount)}</li>`).join('') || '<li>لا يوجد</li>'}</ul>
+          <ul class="panel-list">${payments.slice(0, 10).map((row) => `<li>${row.number} - ${formatMoney(row.amount)}</li>`).join('') || '<li>لا يوجد</li>'}</ul>
         </div>
         <div class="card compact">
           <h4>العملاء (${customers.length})</h4>
-          <ul class="panel-list">${customers.slice(0, 10).map((c) => `<li>${c.code} - ${c.nameAr}</li>`).join('') || '<li>لا يوجد</li>'}</ul>
+          <ul class="panel-list">${customers.slice(0, 10).map((row) => `<li>${row.code} - ${row.nameAr}</li>`).join('') || '<li>لا يوجد</li>'}</ul>
         </div>
         <div class="card compact">
           <h4>الموردون (${suppliers.length})</h4>
-          <ul class="panel-list">${suppliers.slice(0, 10).map((s) => `<li>${s.code} - ${s.nameAr}</li>`).join('') || '<li>لا يوجد</li>'}</ul>
+          <ul class="panel-list">${suppliers.slice(0, 10).map((row) => `<li>${row.code} - ${row.nameAr}</li>`).join('') || '<li>لا يوجد</li>'}</ul>
         </div>
         <div class="card compact">
           <h4>الحسابات (${accounts.length})</h4>
-          <ul class="panel-list">${accounts.slice(0, 10).map((a) => `<li>${a.code} - ${a.nameAr}</li>`).join('') || '<li>لا يوجد</li>'}</ul>
+          <ul class="panel-list">${accounts.slice(0, 10).map((row) => `<li>${row.code} - ${row.nameAr}</li>`).join('') || '<li>لا يوجد</li>'}</ul>
         </div>
       </div>
     `;
   };
 
-  document.getElementById('quick-search-form').addEventListener('submit', async (event) => {
+  document.getElementById('quick-search-form')?.addEventListener('submit', async (event) => {
     event.preventDefault();
     await runSearch();
   });
 
   setPageActions({
-    onSearch: () => document.getElementById('qsearch-keyword').focus(),
+    onSearch: () => document.getElementById('qsearch-keyword')?.focus(),
     onRefresh: () => runSearch()
   });
 }

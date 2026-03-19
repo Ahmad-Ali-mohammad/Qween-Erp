@@ -1,5 +1,5 @@
 import { request, withToast } from '../core/api.js';
-import { setTitle, setPageActions, formatDate, statusBadge } from '../core/ui.js';
+import { formatDate, setPageActions, setTitle, statusBadge } from '../core/ui.js';
 
 function setViewLoading(text) {
   const view = document.getElementById('view');

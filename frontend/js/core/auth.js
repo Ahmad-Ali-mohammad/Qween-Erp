@@ -1,17 +1,14 @@
 import { store } from './store.js';
 import { request } from './api.js';
-import { userBadge } from './ui.js';
 
 export async function ensureUser() {
   if (!store.token) return null;
   try {
     const me = await request('/auth/me');
-    store.user = me.data;
-    userBadge(store.user);
+    store.setUser(me.data);
     return store.user;
   } catch {
     store.clearAuth();
-    userBadge(null);
     return null;
   }
 }
@@ -37,6 +34,5 @@ export async function logout() {
   }
 
   store.clearAuth();
-  userBadge(null);
   location.hash = '#/login';
 }

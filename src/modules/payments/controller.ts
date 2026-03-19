@@ -28,7 +28,7 @@ export async function getOne(req: Request, res: Response) {
 }
 
 export async function complete(req: any, res: Response) {
-  const payment = await service.completePayment(Number(req.params.id), req.user.id, req.body.allocations ?? []);
+  const payment = await service.completePayment(Number(req.params.id), req.user.id, req.body?.allocations ?? []);
   ok(res, payment);
 }
 

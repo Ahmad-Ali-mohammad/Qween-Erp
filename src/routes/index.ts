@@ -31,6 +31,11 @@ import purchaseReturnsRoutes from '../modules/purchase-returns/route';
 import erpExpansionRoutes from '../modules/erp-expansion/route';
 import analyticsRoutes from '../modules/analytics/route';
 import apiCompatRoutes from '../modules/api-compat/route';
+import dashboardRoutes from '../modules/dashboard/route';
+import profileRoutes from '../modules/profile/route';
+import platformAdminRoutes from '../modules/platform-admin/route';
+import workspaceRoutes from '../modules/workspace/route';
+import yearCloseRoutes from '../modules/year-close/route';
 
 const router = Router();
 
@@ -63,6 +68,11 @@ router.use('/purchase-orders', purchaseOrdersRoutes);
 router.use('/purchase-returns', purchaseReturnsRoutes);
 router.use('/reports', reportRoutes);
 router.use('/audit-logs', auditRoutes);
+router.use('/', dashboardRoutes);
+router.use('/', profileRoutes);
+router.use('/', platformAdminRoutes);
+router.use('/', workspaceRoutes);
+router.use('/', yearCloseRoutes);
 router.use('/', apiCompatRoutes);
 router.use('/', erpExpansionRoutes);
 router.use('/analytics', analyticsRoutes);

@@ -127,6 +127,42 @@ tr:hover td {
   font-size: 1.35rem;
 }
 
+.workflow-hero {
+  display: flex;
+  align-items: stretch;
+  justify-content: space-between;
+  gap: 14px;
+  border: 1px solid #d7e6de;
+  background:
+    radial-gradient(circle at 12% 18%, rgba(15, 109, 93, 0.12), transparent 30%),
+    radial-gradient(circle at 88% 14%, rgba(212, 138, 63, 0.16), transparent 28%),
+    linear-gradient(135deg, #fbfdfb 0%, #fffefa 48%, #f7fbff 100%);
+}
+
+.workflow-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.8fr) minmax(320px, 0.9fr);
+  gap: 12px;
+}
+
+.workflow-main,
+.workflow-side {
+  min-width: 0;
+}
+
+.workflow-kpis {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  min-width: 360px;
+}
+
+.workflow-summary-panel {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
 /* Dashboard Analytics */
 .dash-hero {
   display: flex;
@@ -155,6 +191,30 @@ tr:hover td {
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
   min-width: 420px;
+}
+
+.dash-action-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.dash-action-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 40px;
+  padding: 0 14px;
+  border-radius: 999px;
+  background: rgba(15, 109, 93, 0.12);
+  color: #0f6d5d;
+  border: 1px solid rgba(15, 109, 93, 0.16);
+  font-weight: 700;
+}
+
+.dash-action-link:hover {
+  background: rgba(15, 109, 93, 0.18);
 }
 
 .dash-hero-metric {
@@ -934,6 +994,12 @@ tr:hover td {
   .dash-split-list {
     grid-template-columns: 1fr;
   }
+
+  .workflow-kpis,
+  .workflow-summary-panel {
+    grid-template-columns: 1fr;
+    min-width: 0;
+  }
 }
 
 @media (max-width: 960px) {
@@ -951,5 +1017,11 @@ tr:hover td {
 
   .dash-main-grid {
     grid-template-columns: 1fr;
+  }
+
+  .workflow-hero,
+  .workflow-grid {
+    grid-template-columns: 1fr;
+    flex-direction: column;
   }
 }

@@ -131,10 +131,6 @@ const userMfaUpdateSchema = buildStrictModelSchema('userMfaSetting', 'update').t
   const { userId: _userId, ...rest } = body as Record<string, unknown>;
   return rest;
 });
-const integrationUpdateSchema = buildStrictModelSchema('integrationSetting', 'update').transform((body) => {
-  const { key: _key, ...rest } = body as Record<string, unknown>;
-  return rest;
-});
 const taxCategorySchema = z
   .object({
     code: z.string().trim().min(1),
@@ -489,36 +485,6 @@ router.post('/stock-counts/:id/approve', requirePermissions(PERMISSIONS.INVENTOR
   ok(res, approved);
 });
 
-router.get('/backups', requirePermissions(PERMISSIONS.BACKUP_READ), async (req: Request, res: Response) => {
-  const data = await listRows('backupJob', req);
-  ok(res, data.rows, data.meta);
-});
-
-router.get('/backups/schedules', requirePermissions(PERMISSIONS.BACKUP_READ), async (req: Request, res: Response) => {
-  const data = await listRows('backupJob', req, { isScheduled: true });
-  ok(res, data.rows, data.meta);
-});
-
-router.get('/backups/:id', requirePermissions(PERMISSIONS.BACKUP_READ), async (req: Request, res: Response) => {
-  const row = await getDelegate('backupJob').findUnique({ where: { id: parseIdParam(req) } });
-  ok(res, row);
-});
-
-router.post('/backups', requirePermissions(PERMISSIONS.BACKUP_WRITE), validateBody(backupCreateSchema), audit('backup_jobs'), async (req: Request, res: Response) => {
-  const row = await getDelegate('backupJob').create({ data: req.body });
-  ok(res, row, undefined, 201);
-});
-
-router.put('/backups/:id', requirePermissions(PERMISSIONS.BACKUP_WRITE), validateBody(backupUpdateSchema), audit('backup_jobs'), async (req: Request, res: Response) => {
-  const row = await getDelegate('backupJob').update({ where: { id: parseIdParam(req) }, data: req.body });
-  ok(res, row);
-});
-
-router.delete('/backups/:id', requirePermissions(PERMISSIONS.BACKUP_WRITE), audit('backup_jobs'), async (req: Request, res: Response) => {
-  await getDelegate('backupJob').delete({ where: { id: parseIdParam(req) } });
-  ok(res, { deleted: true });
-});
-
 router.get('/projects/:id/tasks', requirePermissions(PERMISSIONS.PROJECTS_READ), async (req: Request, res: Response) => {
   const data = await listRows('projectTask', req, { projectId: parseIdParam(req) });
   ok(res, data.rows, data.meta);
@@ -567,61 +533,6 @@ router.post(
     const delegate = getDelegate('contractMilestone');
     const row = await delegate.create({ data: { ...req.body, contractId: parseIdParam(req) } });
     ok(res, row, undefined, 201);
-  }
-);
-
-router.post('/backups/:id/restore', requirePermissions(PERMISSIONS.BACKUP_WRITE), audit('backup_jobs'), async (req: Request, res: Response) => {
-  const delegate = getDelegate('backupJob');
-  const row = await delegate.create({
-    data: {
-      action: 'RESTORE',
-      sourceBackupId: parseIdParam(req),
-      status: 'QUEUED',
-      requestedAt: new Date()
-    }
-  });
-  ok(res, row, undefined, 202);
-});
-
-router.get('/security/policies', requirePermissions(PERMISSIONS.SECURITY_READ), async (_req: Request, res: Response) => {
-  const row = await getDelegate('securityPolicy').findUnique({ where: { id: 1 } });
-  ok(res, row);
-});
-
-router.put(
-  '/security/policies',
-  requirePermissions(PERMISSIONS.SECURITY_WRITE),
-  validateBody(securityPolicyUpsertSchema),
-  audit('security_policies'),
-  async (req: Request, res: Response) => {
-    const delegate = getDelegate('securityPolicy');
-    const exists = await delegate.findUnique({ where: { id: 1 } });
-    const row = exists
-      ? await delegate.update({ where: { id: 1 }, data: req.body })
-      : await delegate.create({ data: { id: 1, ...req.body } });
-    ok(res, row);
-  }
-);
-
-router.get('/security/mfa/:userId', requirePermissions(PERMISSIONS.SECURITY_READ), async (req: Request, res: Response) => {
-  const userId = z.coerce.number().int().positive().parse(req.params.userId);
-  const row = await getDelegate('userMfaSetting').findUnique({ where: { userId } });
-  ok(res, row);
-});
-
-router.put(
-  '/security/mfa/:userId',
-  requirePermissions(PERMISSIONS.SECURITY_WRITE),
-  validateBody(userMfaUpdateSchema),
-  audit('user_mfa_settings'),
-  async (req: Request, res: Response) => {
-    const delegate = getDelegate('userMfaSetting');
-    const userId = z.coerce.number().int().positive().parse(req.params.userId);
-    const exists = await delegate.findUnique({ where: { userId } });
-    const row = exists
-      ? await delegate.update({ where: { userId }, data: req.body })
-      : await delegate.create({ data: { ...req.body, userId } });
-    ok(res, row);
   }
 );
 
@@ -681,36 +592,6 @@ router.put(
         otp: req.body.otp || null,
         ...(req.body.settings ?? {})
       }
-    });
-    ok(res, row);
-  }
-);
-
-router.get('/internal-controls', requirePermissions(PERMISSIONS.AUDIT_READ), async (_req: Request, res: Response) => {
-  const row = await getIntegrationByKey('internal-controls');
-  ok(
-    res,
-    row ?? {
-      key: 'internal-controls',
-      provider: 'SYSTEM',
-      isEnabled: false,
-      status: 'DRAFT',
-      settings: {}
-    }
-  );
-});
-
-router.put(
-  '/internal-controls',
-  requirePermissions(PERMISSIONS.SETTINGS_WRITE),
-  validateBody(internalControlsSchema),
-  audit('integration_settings'),
-  async (req: Request, res: Response) => {
-    const row = await upsertIntegrationByKey('internal-controls', {
-      provider: 'SYSTEM',
-      isEnabled: req.body.isEnabled ?? true,
-      status: req.body.status ?? 'ACTIVE',
-      settings: req.body.settings ?? {}
     });
     ok(res, row);
   }
@@ -800,26 +681,6 @@ router.get('/tax-reports', requirePermissions(PERMISSIONS.TAX_READ), async (req:
   ok(res, { summary: { ...summary, activeCodes: codes.filter((c) => c.isActive).length }, rows, codes });
 });
 
-router.get('/integrations/:name', requirePermissions(PERMISSIONS.INTEGRATIONS_READ), async (req: Request, res: Response) => {
-  const row = await getDelegate('integrationSetting').findUnique({ where: { key: req.params.name } });
-  ok(res, row);
-});
-
-router.put(
-  '/integrations/:name',
-  requirePermissions(PERMISSIONS.INTEGRATIONS_WRITE),
-  validateBody(integrationUpdateSchema),
-  audit('integration_settings'),
-  async (req: Request, res: Response) => {
-    const delegate = getDelegate('integrationSetting');
-    const key = req.params.name;
-    const exists = await delegate.findUnique({ where: { key } });
-    const payload = { ...req.body, key };
-    const row = exists ? await delegate.update({ where: { key }, data: payload }) : await delegate.create({ data: payload });
-    ok(res, row);
-  }
-);
-
 router.post('/import/:resource', requirePermissions(PERMISSIONS.SETTINGS_WRITE), validateBody(importRowsSchema), async (req: Request, res: Response) => {
   const rows = Array.isArray(req.body?.rows) ? req.body.rows.length : 0;
   ok(
@@ -828,41 +689,6 @@ router.post('/import/:resource', requirePermissions(PERMISSIONS.SETTINGS_WRITE),
       resource: req.params.resource,
       acceptedRows: rows,
       status: 'ACCEPTED'
-    },
-    undefined,
-    202
-  );
-});
-
-router.get('/year-close/check', requirePermissions(PERMISSIONS.FISCAL_READ), async (req: Request, res: Response) => {
-  const fiscalYear = Number(req.query.fiscalYear ?? new Date().getUTCFullYear());
-  const [draftEntries, openPeriods] = await Promise.all([
-    prisma.journalEntry.count({ where: { status: 'DRAFT', date: { gte: new Date(Date.UTC(fiscalYear, 0, 1)), lt: new Date(Date.UTC(fiscalYear + 1, 0, 1)) } } }),
-    prisma.accountingPeriod.count({ where: { fiscalYear: { startDate: { gte: new Date(Date.UTC(fiscalYear, 0, 1)), lt: new Date(Date.UTC(fiscalYear + 1, 0, 1)) } }, status: 'OPEN' } })
-  ]);
-  ok(res, { fiscalYear, draftEntries, openPeriods, canClose: draftEntries === 0 && openPeriods === 0 });
-});
-
-router.post('/year-close/transfer-balances', requirePermissions(PERMISSIONS.FISCAL_WRITE), validateBody(yearCloseTransferSchema), audit('year_close'), async (req: Request, res: Response) => {
-  ok(
-    res,
-    {
-      fiscalYear: req.body?.fiscalYear,
-      nextFiscalYear: req.body?.nextFiscalYear,
-      transferred: true
-    },
-    undefined,
-    202
-  );
-});
-
-router.post('/year-close/opening-entry', requirePermissions(PERMISSIONS.FISCAL_WRITE), validateBody(yearCloseOpeningSchema), audit('journal_entries'), async (req: Request, res: Response) => {
-  ok(
-    res,
-    {
-      status: 'QUEUED',
-      entryNumber: req.body?.entryNumber ?? null,
-      message: 'تم جدولة إنشاء قيد الأرصدة الافتتاحية'
     },
     undefined,
     202

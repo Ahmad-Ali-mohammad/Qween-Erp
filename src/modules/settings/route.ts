@@ -98,6 +98,16 @@ router.get('/system', requirePermissions(PERMISSIONS.SETTINGS_READ), async (_req
   ok(res, { ...settingsData, postingAccounts: settingsData.postingAccounts ?? {} });
 });
 
+router.get('/sequences', requirePermissions(PERMISSIONS.SETTINGS_READ), async (_req, res) => {
+  const settings = await prisma.systemSettings.findUnique({ where: { id: 1 } });
+  ok(res, {
+    invoice: settings?.invoicePrefix ?? 'INV',
+    quote: settings?.quotePrefix ?? 'QT',
+    paymentReceipt: 'RCV',
+    paymentVoucher: 'PAY'
+  });
+});
+
 router.put('/system', requirePermissions(PERMISSIONS.SETTINGS_WRITE), validateBody(systemSchema), async (req, res, next) => {
   try {
     const postingAccounts = await validatePostingAccountsInDb(req.body.postingAccounts);
@@ -106,6 +116,29 @@ router.put('/system', requirePermissions(PERMISSIONS.SETTINGS_WRITE), validateBo
       update: { ...req.body, postingAccounts },
       create: { id: 1, ...req.body, postingAccounts }
     });
+    ok(res, settings);
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.put('/sequences/:entity', requirePermissions(PERMISSIONS.SETTINGS_WRITE), async (req, res, next) => {
+  try {
+    const entity = String(req.params.entity ?? '').toLowerCase();
+    const prefix = String(req.body?.prefix ?? '').trim();
+    if (!prefix) throw Errors.validation('prefix مطلوب');
+
+    const data: Record<string, unknown> = {};
+    if (entity === 'invoice' || entity === 'sales-invoice') data.invoicePrefix = prefix;
+    if (entity === 'quote' || entity === 'quotation') data.quotePrefix = prefix;
+    if (!Object.keys(data).length) throw Errors.validation('entity غير مدعوم');
+
+    const settings = await prisma.systemSettings.upsert({
+      where: { id: 1 },
+      update: data,
+      create: { id: 1, ...data }
+    });
+
     ok(res, settings);
   } catch (error) {
     next(error);

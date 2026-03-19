@@ -1,24 +1,6 @@
-import { request, withToast, extractRows, toQuery } from '../core/api.js';
-import { setTitle, table, formatDate, formatMoney, statusBadge, setPageActions, confirmAction } from '../core/ui.js';
-
-function asArray(value) {
-  return Array.isArray(value) ? value : [];
-}
-
-function todayIso() {
-  return new Date().toISOString().slice(0, 10);
-}
-
-function currentYear() {
-  return new Date().getFullYear();
-}
-
-function toIsoDateTime(value) {
-  if (!value) return undefined;
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return undefined;
-  return date.toISOString();
-}
+import { request, withToast, extractRows, toQuery } from '../../core/api.js';
+import { setTitle, table, formatDate, formatMoney, statusBadge, setPageActions, confirmAction } from '../../core/ui.js';
+import { asArray, currentYear, todayIso, toIsoDateTime } from './shared.js';
 
 export async function renderOperations(mode) {
   if (mode === 'opportunities') return renderOpportunities();

@@ -1,8 +1,9 @@
 ﻿import { t } from '../i18n/ar.js';
 import { store } from './store.js';
+import { runtimeConfig } from './runtime.js';
 import { toast } from './ui.js';
 
-const base = 'http://localhost:3000/api';
+const base = runtimeConfig.apiBase;
 const inFlightGetRequests = new Map();
 const getResponseCache = new Map();
 const GET_CACHE_TTL_MS = 3000;
@@ -49,6 +50,13 @@ function normalizePath(path) {
   return normalized;
 }
 
+export function resolveApiUrl(path) {
+  const normalizedPath = normalizePath(path);
+  return /^https?:\/\//i.test(normalizedPath)
+    ? normalizedPath
+    : `${base.replace(/\/+$/, '')}${normalizedPath}`;
+}
+
 export async function request(path, options = {}) {
   const headers = {
     'Content-Type': 'application/json',
@@ -57,10 +65,7 @@ export async function request(path, options = {}) {
 
   if (store.token) headers.Authorization = `Bearer ${store.token}`;
 
-  const normalizedPath = normalizePath(path);
-  const url = /^https?:\/\//i.test(normalizedPath)
-    ? normalizedPath
-    : `${base.replace(/\/+$/, '')}${normalizedPath}`;
+  const url = resolveApiUrl(path);
 
   const method = String(options.method || 'GET').toUpperCase();
   const requestKey = `${method}:${url}:${headers.Authorization || ''}`;

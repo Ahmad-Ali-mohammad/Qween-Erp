@@ -140,25 +140,47 @@ export async function createPayment(data: any, userId: number) {
   if (data.type === 'PAYMENT' && !data.supplierId) throw Errors.validation('سند الصرف يتطلب موردًا');
 
   const number = await generateNumber(data.type);
+  const allocations = normalizeAllocations(data.allocations ?? []);
+  const allocatedTotal = allocations.reduce((sum, row) => sum + row.amount, 0);
+  if (allocatedTotal - Number(data.amount) > 0.01) {
+    throw Errors.business('إجمالي التوزيع يتجاوز مبلغ السند');
+  }
 
-  return prisma.payment.create({
-    data: {
-      number,
-      date: parseDateOrThrow(data.date),
-      type: data.type,
-      method: data.method,
-      amount: data.amount,
-      customerId: data.customerId,
-      supplierId: data.supplierId,
-      bankId: data.bankId,
-      checkNumber: data.checkNumber,
-      checkDate: data.checkDate ? parseDateOrThrow(data.checkDate, 'checkDate') : null,
-      checkBank: data.checkBank,
-      description: data.description,
-      notes: data.notes,
-      status: 'PENDING',
-      createdById: userId
+  return prisma.$transaction(async (tx) => {
+    const payment = await tx.payment.create({
+      data: {
+        number,
+        date: parseDateOrThrow(data.date),
+        type: data.type,
+        method: data.method,
+        amount: data.amount,
+        customerId: data.customerId,
+        supplierId: data.supplierId,
+        bankId: data.bankId,
+        checkNumber: data.checkNumber,
+        checkDate: data.checkDate ? parseDateOrThrow(data.checkDate, 'checkDate') : null,
+        checkBank: data.checkBank,
+        description: data.description,
+        notes: data.notes,
+        status: 'PENDING',
+        createdById: userId
+      }
+    });
+
+    if (allocations.length) {
+      await tx.paymentAllocation.createMany({
+        data: allocations.map((allocation) => ({
+          paymentId: payment.id,
+          invoiceId: allocation.invoiceId,
+          amount: allocation.amount
+        }))
+      });
     }
+
+    return tx.payment.findUnique({
+      where: { id: payment.id },
+      include: { allocations: { include: { invoice: true } } }
+    });
   });
 }
 
@@ -210,13 +232,43 @@ export async function updatePayment(id: number, data: any) {
   if (!current) throw Errors.notFound('السند غير موجود');
   if (current.status !== 'PENDING') throw Errors.business('يمكن تعديل السند المعلق فقط');
 
-  return prisma.payment.update({
-    where: { id },
-    data: {
-      ...data,
-      date: data.date ? parseDateOrThrow(data.date) : current.date,
-      checkDate: data.checkDate ? parseDateOrThrow(data.checkDate, 'checkDate') : current.checkDate
+  const allocations = data.allocations ? normalizeAllocations(data.allocations) : null;
+  const nextAmount = Number(data.amount ?? current.amount);
+  if (allocations) {
+    const allocatedTotal = allocations.reduce((sum, row) => sum + row.amount, 0);
+    if (allocatedTotal - nextAmount > 0.01) {
+      throw Errors.business('إجمالي التوزيع يتجاوز مبلغ السند');
     }
+  }
+
+  return prisma.$transaction(async (tx) => {
+    const updated = await tx.payment.update({
+      where: { id },
+      data: {
+        ...data,
+        allocations: undefined,
+        date: data.date ? parseDateOrThrow(data.date) : current.date,
+        checkDate: data.checkDate ? parseDateOrThrow(data.checkDate, 'checkDate') : current.checkDate
+      }
+    });
+
+    if (allocations) {
+      await tx.paymentAllocation.deleteMany({ where: { paymentId: id } });
+      if (allocations.length) {
+        await tx.paymentAllocation.createMany({
+          data: allocations.map((allocation) => ({
+            paymentId: id,
+            invoiceId: allocation.invoiceId,
+            amount: allocation.amount
+          }))
+        });
+      }
+    }
+
+    return tx.payment.findUnique({
+      where: { id: updated.id },
+      include: { allocations: { include: { invoice: true } } }
+    });
   });
 }
 

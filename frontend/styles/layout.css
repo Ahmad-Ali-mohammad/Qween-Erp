@@ -42,27 +42,107 @@
 
 .nav-section {
   border: 1px solid rgba(255, 255, 255, 0.2);
-  border-radius: 12px;
-  padding: 10px;
-  background: rgba(15, 23, 42, 0.12);
+  border-radius: 16px;
+  padding: 12px;
+  background: rgba(15, 23, 42, 0.14);
 }
 
-.nav-section > h4 {
+.nav-section.is-priority {
+  border-color: rgba(255, 255, 255, 0.34);
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.nav-section-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.nav-section-kicker {
+  margin: 0;
+  color: rgba(232, 245, 255, 0.74);
+  font-size: 0.78rem;
+}
+
+.nav-section > .nav-section-head h4 {
   color: #e8f5ff;
-  font-size: 0.95rem;
-  margin-bottom: 8px;
+  font-size: 1rem;
+  margin: 2px 0 0;
 }
 
-.nav-section a {
-  display: block;
-  border-radius: 8px;
-  padding: 9px 10px;
+.nav-priority-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 54px;
+  min-height: 28px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.16);
+  color: #fff;
+  font-size: 0.78rem;
+}
+
+.nav-section-description {
+  margin: 10px 0 12px;
+  color: rgba(244, 251, 255, 0.88);
+  font-size: 0.86rem;
+  line-height: 1.6;
+}
+
+.nav-links {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.nav-link {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  border-radius: 12px;
+  padding: 10px 12px;
   color: #f4fbff;
-  font-size: 0.95rem;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
-.nav-section a:hover,
-.nav-section a.active {
+.nav-link-main {
+  font-size: 0.95rem;
+  font-weight: 700;
+}
+
+.nav-link-meta {
+  color: rgba(232, 245, 255, 0.74);
+  font-size: 0.79rem;
+}
+
+.nav-link:hover,
+.nav-link.active {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.nav-secondary-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.nav-secondary-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  padding: 7px 10px;
+  color: #f4fbff;
+  background: rgba(255, 255, 255, 0.08);
+  font-size: 0.84rem;
+}
+
+.nav-secondary-link:hover,
+.nav-secondary-link.active {
   background: rgba(255, 255, 255, 0.18);
 }
 

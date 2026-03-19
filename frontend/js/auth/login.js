@@ -1,4 +1,4 @@
-﻿import { request } from '../core/api.js';
+import { request } from '../core/api.js';
 import { store } from '../core/store.js';
 import { setPageActions, setTitle, toast } from '../core/ui.js';
 
@@ -7,13 +7,19 @@ export async function renderLogin() {
   setPageActions({});
 
   const view = document.getElementById('view');
+  const showDevCredentials = ['localhost', '127.0.0.1'].includes(window.location.hostname);
+
   view.innerHTML = `
     <div class="card auth-card" style="max-width:540px; margin: 0 auto;">
       <div class="section-title">
         <h3>تسجيل الدخول</h3>
         <span class="muted">ERP شركة واحدة</span>
       </div>
-      <p class="muted">بيانات تجريبية: <span class="mono">admin</span> / <span class="mono">admin123</span></p>
+      ${
+        showDevCredentials
+          ? '<p class="muted">بيانات تجريبية: <span class="mono">admin</span> / <span class="mono">admin123</span></p>'
+          : ''
+      }
       <form id="login-form" class="grid cols-1" autocomplete="on">
         <div>
           <label>اسم المستخدم أو البريد الإلكتروني</label>
@@ -32,7 +38,7 @@ export async function renderLogin() {
     </div>
   `;
 
-  document.getElementById('login-form').addEventListener('submit', async (event) => {
+  document.getElementById('login-form')?.addEventListener('submit', async (event) => {
     event.preventDefault();
 
     try {
@@ -58,4 +64,3 @@ export async function renderLogin() {
     }
   });
 }
-

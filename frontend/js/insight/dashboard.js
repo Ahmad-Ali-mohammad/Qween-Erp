@@ -1,5 +1,7 @@
 import { request } from '../core/api.js';
 import { formatDate, formatMoney, setPageActions, setTitle, statusBadge } from '../core/ui.js';
+import { store } from '../core/store.js';
+import { getDashboardProfile } from '../shell/workspace-config.js';
 
 let dashboardTimer = null;
 let hashListenerBound = false;
@@ -314,6 +316,60 @@ function bindNavigationTargets(view) {
   });
 }
 
+function resolveMetricValue(metric, kpis, derived) {
+  if (metric.source === 'derived') {
+    return derived[metric.key] ?? 0;
+  }
+
+  return kpis?.[metric.key] ?? 0;
+}
+
+function formatMetricValue(metric, value) {
+  if (['salesTotal', 'expenseTotal', 'netResult'].includes(metric.key)) {
+    return formatMoney(value);
+  }
+
+  return String(toNumber(value));
+}
+
+function renderPrimaryActions(profile) {
+  return profile.primaryActions
+    .map(
+      (action) => `
+        <a class="dash-action-link" href="${action.path}">
+          <span>${action.label}</span>
+        </a>
+      `
+    )
+    .join('');
+}
+
+function renderPriorityMetrics(profile, kpis, derived) {
+  return profile.priorityMetrics
+    .map((metric) => {
+      const value = resolveMetricValue(metric, kpis, derived);
+      return `
+        <article class="dash-kpi-card clickable" data-nav="${metric.route}">
+          <p>${metric.label}</p>
+          <strong>${formatMetricValue(metric, value)}</strong>
+        </article>
+      `;
+    })
+    .join('');
+}
+
+function renderReviewBlock(block, recent, pending) {
+  if (block.source === 'recent' && block.key === 'journals') {
+    return renderRecentJournals(recent.journals);
+  }
+
+  if (block.source === 'recent' && block.key === 'invoices') {
+    return renderRecentInvoices(recent.invoices);
+  }
+
+  return renderPendingItems(pending[block.key], block.empty, block.route);
+}
+
 export async function renderDashboard() {
   setTitle('لوحة التحكم');
   setPageActions({ onRefresh: () => renderDashboard() });
@@ -334,17 +390,26 @@ export async function renderDashboard() {
     const expenseSeries = toArray(expenseRes?.data);
     const recent = recentRes?.data || {};
     const pending = pendingRes?.data || {};
+    const profile = getDashboardProfile(store.user);
+    const displayName = store.user?.fullName || store.user?.name || store.user?.username || 'المستخدم';
 
     const salesTotal = salesSeries.reduce((sum, item) => sum + toNumber(item.amount), 0);
     const expenseTotal = expenseSeries.reduce((sum, item) => sum + toNumber(item.amount), 0);
     const netResult = salesTotal - expenseTotal;
+    const derived = { salesTotal, expenseTotal, netResult };
 
     view.innerHTML = `
       <section class="dash-hero card">
         <div>
-          <p class="dash-overline">نظرة عامة تشغيلية</p>
-          <h3>لوحة تحليلات الأداء المالي والتشغيلي</h3>
-          <p class="muted">ملخص فوري لحالة المبيعات والمصروفات والعمليات المعلقة.</p>
+          <p class="dash-overline">${profile.title}</p>
+          <h3>مرحباً ${displayName}</h3>
+          <p class="muted">${profile.subtitle}</p>
+          <div class="dash-action-links">
+            ${renderPrimaryActions(profile)}
+          </div>
+          <div class="dash-summary-note">
+            ${profile.heroNote}
+          </div>
         </div>
         <div class="dash-hero-metrics">
           <div class="dash-hero-metric">
@@ -363,39 +428,20 @@ export async function renderDashboard() {
       </section>
 
       <section class="dash-kpi-grid">
-        <article class="dash-kpi-card clickable" data-nav="#/sales-invoices">
-          <p>فواتير معلقة</p>
-          <strong>${toNumber(kpis.pendingInvoices)}</strong>
-        </article>
-        <article class="dash-kpi-card clickable" data-nav="#/payment-vouchers">
-          <p>مدفوعات معلقة</p>
-          <strong>${toNumber(kpis.pendingPayments)}</strong>
-        </article>
-        <article class="dash-kpi-card clickable" data-nav="#/journals">
-          <p>قيود مسودة</p>
-          <strong>${toNumber(kpis.draftEntries)}</strong>
-        </article>
-        <article class="dash-kpi-card clickable" data-nav="#/assets">
-          <p>أصول نشطة</p>
-          <strong>${toNumber(kpis.activeAssets)}</strong>
-        </article>
-        <article class="dash-kpi-card clickable" data-nav="#/tasks">
-          <p>مهام مفتوحة</p>
-          <strong>${toNumber(kpis.openTasks)}</strong>
-        </article>
+        ${renderPriorityMetrics(profile, kpis, derived)}
       </section>
 
       <section class="dash-main-grid">
         <article class="card dash-chart-card">
           <div class="section-title">
             <h3>اتجاه المبيعات مقابل المصروفات</h3>
-            <span class="muted">آخر الفترات المتاحة</span>
+            <span class="muted">صورة سريعة لدعم قرار ${profile.title}</span>
           </div>
           ${buildChartHtml(salesSeries, expenseSeries)}
         </article>
 
         <article class="card dash-summary-card">
-          <h3>ملخص تنفيذي سريع</h3>
+          <h3>النبض الحالي</h3>
           <ul class="dash-summary-list">
             <li>
               <span>الفارق بين المبيعات والمصروفات</span>
@@ -415,7 +461,7 @@ export async function renderDashboard() {
             </li>
           </ul>
           <div class="dash-summary-note">
-            يفضّل مراجعة البنود المعلقة يومياً لتقليل مخاطر التأخير في التحصيل والتنفيذ.
+            ${profile.heroNote}
           </div>
         </article>
       </section>
@@ -438,43 +484,19 @@ export async function renderDashboard() {
       </section>
 
       <section class="dash-main-grid">
-        <article class="card">
-          <div class="section-title">
-            <h3>آخر المعاملات</h3>
-            <a href="#/journals" class="muted">الذهاب إلى القيود</a>
-          </div>
-          <div class="dash-split-list">
-            <div>
-              <h4>القيود</h4>
-              <ul class="panel-list">${renderRecentJournals(recent.journals)}</ul>
-            </div>
-            <div>
-              <h4>الفواتير</h4>
-              <ul class="panel-list">${renderRecentInvoices(recent.invoices)}</ul>
-            </div>
-          </div>
-        </article>
-
-        <article class="card">
-          <div class="section-title">
-            <h3>قائمة المتابعة</h3>
-            <a href="#/tasks" class="muted">كل المهام</a>
-          </div>
-          <div class="dash-pending-blocks">
-            <div>
-              <h4>المهام</h4>
-              <ul class="panel-list">${renderPendingItems(pending.tasks, 'لا توجد مهام معلقة.', '#/tasks')}</ul>
-            </div>
-            <div>
-              <h4>تذاكر الدعم</h4>
-              <ul class="panel-list">${renderPendingItems(pending.tickets, 'لا توجد تذاكر مفتوحة.', '#/support-tickets')}</ul>
-            </div>
-            <div>
-              <h4>طلبات الإجازة</h4>
-              <ul class="panel-list">${renderPendingItems(pending.leaves, 'لا توجد طلبات إجازة قيد الانتظار.', '#/leave-requests')}</ul>
-            </div>
-          </div>
-        </article>
+        ${profile.reviewBlocks
+          .map(
+            (block) => `
+              <article class="card">
+                <div class="section-title">
+                  <h3>${block.label}</h3>
+                  <a href="${block.route}" class="muted">فتح الوحدة</a>
+                </div>
+                <ul class="panel-list">${renderReviewBlock(block, recent, pending)}</ul>
+              </article>
+            `
+          )
+          .join('')}
       </section>
     `;
 
