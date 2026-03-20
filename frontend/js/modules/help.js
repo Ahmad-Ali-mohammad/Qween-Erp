@@ -5,6 +5,15 @@ function asArray(value) {
   return Array.isArray(value) ? value : [];
 }
 
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+}
+
 function currentTicketNumber() {
   return `SUP-${Date.now().toString().slice(-8)}`;
 }
@@ -106,41 +115,122 @@ async function renderAssistant() {
   const view = document.getElementById('view');
   view.innerHTML = '<div class="card">جاري تحميل المساعد الذكي...</div>';
 
+  const state = {
+    history: [],
+    suggestions: [],
+    pending: false
+  };
+
   const load = async () => {
-    const suggestions = asArray((await request('/assistant/suggest')).data);
+    state.suggestions = asArray((await request('/assistant/suggest')).data);
 
     view.innerHTML = `
       <div class="card">
         <h3>اقتراحات سريعة</h3>
-        <ul>
-          ${suggestions.map((s) => `<li>${s}</li>`).join('')}
-        </ul>
+        <div id="assistant-suggestions" class="actions" style="flex-wrap:wrap;gap:8px;"></div>
       </div>
 
       <div class="card">
         <h3>اسأل المساعد</h3>
         <form id="assistant-form" class="grid-2">
           <div style="grid-column:1 / -1;"><label>السؤال</label><input id="assistant-query" required placeholder="اكتب سؤالك..." /></div>
-          <div class="actions"><button class="btn btn-primary" type="submit">إرسال</button></div>
+          <div class="actions"><button id="assistant-submit" class="btn btn-primary" type="submit">إرسال</button></div>
         </form>
-        <div id="assistant-answer" class="muted" style="margin-top:12px;">لا يوجد رد بعد.</div>
+        <div id="assistant-answer" style="margin-top:12px;"></div>
       </div>
     `;
 
+    const suggestionsEl = document.getElementById('assistant-suggestions');
+    const answerEl = document.getElementById('assistant-answer');
+    const inputEl = document.getElementById('assistant-query');
+    const submitEl = document.getElementById('assistant-submit');
+
+    const renderSuggestions = () => {
+      suggestionsEl.innerHTML = state.suggestions.length
+        ? state.suggestions
+            .map(
+              (suggestion, index) => `
+                <button type="button" class="btn btn-secondary btn-sm" data-assistant-index="${index}">
+                  ${escapeHtml(suggestion)}
+                </button>
+              `
+            )
+            .join('')
+        : '<span class="muted">لا توجد اقتراحات حالياً.</span>';
+
+      suggestionsEl.querySelectorAll('[data-assistant-index]').forEach((button) => {
+        button.addEventListener('click', () => {
+          const suggestion = state.suggestions[Number(button.getAttribute('data-assistant-index') || -1)] || '';
+          inputEl.value = suggestion;
+          inputEl.focus();
+        });
+      });
+    };
+
+    const renderConversation = () => {
+      if (!state.history.length) {
+        answerEl.innerHTML = '<div class="muted">ابدأ بسؤال عن الفواتير، القيود، التقارير، أو المخزون.</div>';
+        return;
+      }
+
+      answerEl.innerHTML = state.history
+        .map(
+          (message) => `
+            <div class="card" style="margin-top:10px;border-inline-start:4px solid ${message.role === 'user' ? '#0f6d5d' : '#c89b3c'};">
+              <strong>${message.role === 'user' ? 'أنت' : 'المساعد'}</strong>
+              <div style="margin-top:8px;white-space:pre-wrap;line-height:1.8;">${escapeHtml(message.content)}</div>
+              ${
+                message.meta
+                  ? `<div class="muted" style="margin-top:8px;">المزوّد: ${escapeHtml(message.meta.provider || '-')} | النموذج: ${escapeHtml(message.meta.model || '-')}</div>`
+                  : ''
+              }
+            </div>
+          `
+        )
+        .join('');
+    };
+
+    const setPending = (value) => {
+      state.pending = value;
+      submitEl.disabled = value;
+      submitEl.textContent = value ? 'جاري التحليل...' : 'إرسال';
+    };
+
+    renderSuggestions();
+    renderConversation();
+
     document.getElementById('assistant-form')?.addEventListener('submit', async (event) => {
       event.preventDefault();
-      const query = document.getElementById('assistant-query').value.trim();
-      const response = (await request('/assistant/query', { method: 'POST', body: JSON.stringify({ query }) })).data || {};
-      const answer = response.answer || 'لا يوجد رد.';
-      const followup = asArray(response.suggestions);
-      document.getElementById('assistant-answer').innerHTML = `
-        <div><strong>الرد:</strong> ${answer}</div>
-        ${followup.length ? `<div style="margin-top:8px;"><strong>اقتراحات:</strong><ul>${followup.map((x) => `<li>${x}</li>`).join('')}</ul></div>` : ''}
-      `;
+      const query = inputEl.value.trim();
+      if (!query || state.pending) return;
+
+      const historyForRequest = state.history.map((message) => ({ role: message.role, content: message.content })).slice(-6);
+      state.history.push({ role: 'user', content: query });
+      inputEl.value = '';
+      renderConversation();
+      setPending(true);
+
+      try {
+        const response = (await request('/assistant/query', {
+          method: 'POST',
+          body: JSON.stringify({ query, history: historyForRequest })
+        })).data || {};
+
+        state.history.push({
+          role: 'assistant',
+          content: response.answer || 'لا يوجد رد.',
+          meta: { provider: response.provider, model: response.model, enabled: response.enabled }
+        });
+        state.suggestions = asArray(response.suggestions);
+        renderSuggestions();
+        renderConversation();
+      } finally {
+        setPending(false);
+      }
     });
 
     setPageActions({
-      onSearch: () => document.getElementById('assistant-query')?.focus(),
+      onSearch: () => inputEl?.focus(),
       onRefresh: () => load()
     });
   };

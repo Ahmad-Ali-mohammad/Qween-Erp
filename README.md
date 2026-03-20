@@ -36,6 +36,43 @@
 7. تشغيل التطبيق:
 `npm run dev`
 
+## إعدادات المرحلة الأساسية
+
+- يدعم المشروع الآن Event Outbox مع RabbitMQ بشكل اختياري.
+- إذا لم تُفعّل RabbitMQ فالتطبيق سيبقى يعمل، لكن الأحداث ستبقى محفوظة داخل `OutboxEvent` حتى يتم نشرها.
+
+## شريحة المرحلة التالية المنفذة
+
+- تم تفعيل تدفق `Opportunity -> Contract -> Project` عبر المسار:
+  - `POST /api/crm/opportunities/:id/award`
+
+- تم تفعيل سجل الوقت وتوزيع تكلفة العمالة على المشاريع عبر المسارات:
+  - `GET /api/hr/timesheets`
+  - `GET /api/hr/timesheets/:id`
+  - `POST /api/hr/timesheets`
+  - `POST /api/hr/timesheets/:id/approve`
+  - `POST /api/hr/payroll/:id/distribute`
+
+- تم توسيع النماذج التشغيلية في `Prisma` لتشمل:
+  - `Attendance`
+  - `Timesheet`
+  - `UserBranchAccess`
+  - `Project.contractId`
+  - `PayrollRun.branchId`
+  - `PayrollLine.branchId`
+
+متغيرات البيئة الجديدة:
+
+- `RABBITMQ_ENABLED`
+- `RABBITMQ_URL`
+- `RABBITMQ_EXCHANGE`
+- `OUTBOX_POLL_INTERVAL_MS`
+- `OUTBOX_BATCH_SIZE`
+- `OBJECT_STORAGE_PROVIDER`
+- `OBJECT_STORAGE_ENDPOINT`
+- `OBJECT_STORAGE_BUCKET`
+- `OBJECT_STORAGE_REGION`
+
 ## فحص ترميز العربية
 
 قبل النشر أو الدمج يمكنك تشغيل:

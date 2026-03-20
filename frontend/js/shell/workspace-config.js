@@ -1,4 +1,5 @@
 import { t } from '../i18n/ar.js';
+import { findSystemByPath, systemsGroupMeta, systemsRegistry } from '../systems/registry.js';
 
 export const routePermissions = {
   '/quick-journal': 'journal.create',
@@ -294,7 +295,41 @@ function hasPermission(user, permissionKey) {
 }
 
 export function canAccessPath(path, user) {
+  const systemMatch = findSystemByPath(path);
+  if (systemMatch) {
+    return hasPermission(user, systemMatch.permission);
+  }
   return hasPermission(user, routePermissions[path]);
+}
+
+function getSystemSections(user, profile) {
+  const visibleSystems = systemsRegistry.filter((system) => canAccessPath(system.route, user));
+
+  return Object.entries(systemsGroupMeta)
+    .map(([group, meta]) => {
+      const items = visibleSystems
+        .filter((system) => system.group === group)
+        .map((system) => ({
+          path: system.route,
+          label: system.title,
+          meta: system.summary
+        }));
+
+      return {
+        id: `systems-${group}`,
+        title: meta.title,
+        kicker: meta.kicker,
+        description: meta.description,
+        focusRoles: [profile],
+        items,
+        secondary: []
+      };
+    })
+    .filter((section) => section.items.length > 0)
+    .map((section, index) => ({
+      ...section,
+      isPriority: index === 0
+    }));
 }
 
 export function resolveRoleProfile(user) {
@@ -315,8 +350,9 @@ export function resolveRoleProfile(user) {
 
 export function getNavigationSections(user) {
   const profile = resolveRoleProfile(user);
+  const systemSections = getSystemSections(user, profile);
 
-  return workspaceSections
+  const workspaceVisibleSections = workspaceSections
     .map((section) => ({
       ...section,
       items: section.items.filter((item) => canAccessPath(item.path, user)),
@@ -325,6 +361,8 @@ export function getNavigationSections(user) {
     }))
     .filter((section) => section.items.length > 0)
     .sort((left, right) => Number(right.isPriority) - Number(left.isPriority));
+
+  return [...systemSections, ...workspaceVisibleSections];
 }
 
 export function getDashboardProfile(user) {

@@ -77,6 +77,30 @@ Refactor the ERP into clearer, cohesive modules without breaking the current API
 
 ### Backend
 
+- `src/modules/finance/route.ts`
+- `src/modules/crm/route.ts`
+- `src/modules/hr/route.ts`
+- `src/modules/projects/route.ts`
+- `src/modules/procurement/route.ts`
+- `src/modules/inventory/route.ts`
+  - Legal domain namespaces now exist beside the legacy flat routes.
+  - Existing modules stay mounted at old paths while new `/api/finance/*`, `/api/crm/*`, `/api/hr/*`, `/api/projects/*`, `/api/procurement/*`, `/api/inventory/*`, `/api/platform/*`, and `/api/documents/*` aliases own the future integration surface.
+
+- `src/modules/platform/route.ts`
+  - Branches, approval workflows, and outbox operations moved into a dedicated platform boundary.
+
+- `src/modules/documents/route.ts`
+  - Document metadata and attachment lifecycle now live in a dedicated document module.
+
+- `src/modules/crm/opportunities.service.ts`
+  - Opportunity award orchestration now creates approved contracts and execution projects in one transactional boundary.
+
+- `src/modules/hr/timesheets.service.ts`
+  - Timesheets are now a first-class HR/projects bridge with approval and payroll-to-project cost distribution.
+
+- `src/platform/events/*`
+  - Outbox contracts, enqueue helpers, RabbitMQ publisher, and worker bootstrap added for event-driven integration.
+
 - `src/modules/dashboard/route.ts`
   - Dashboard KPIs, charts, recent activity, pending queues.
 
@@ -94,6 +118,35 @@ Refactor the ERP into clearer, cohesive modules without breaking the current API
 
 - `src/modules/settings/route.ts`
   - Sequence compatibility endpoints now live with system settings.
+
+- `prisma/schema.prisma`
+  - Phase 0 shared foundation introduced:
+  - `Branch`
+  - `ApprovalWorkflow`
+  - `Document`
+  - `OutboxEvent`
+  - `EventConsumption`
+  - Key operational documents now carry `branchId`, `approvalStatus`, `postingStatus`, and `attachmentsCount` where relevant.
+  - Phase 1 slice aligned the schema and runtime models for:
+  - `Project.contractId`
+  - `Attendance`
+  - `Timesheet`
+  - `UserBranchAccess`
+  - `PayrollRun.branchId`
+  - `PayrollLine.branchId`
+
+## Accounting Assumptions Implemented
+
+1. Accounting basis is `accrual`.
+2. Posting into GL remains immutable after posting; issue/complete transitions create journals instead of mutating posted entries.
+3. Operational status is separate from posting status:
+   - quote uses business status plus `approvalStatus`
+   - invoice/payment keep `status` independent from `postingStatus`
+4. Initial tax assumption remains VAT-exclusive pricing with line-level tax rates already used by invoice and quote calculations.
+5. The first release remains `single legal entity + branches`, not multi-company.
+6. RabbitMQ is optional at runtime:
+   - when disabled, outbox rows are still created
+   - when enabled, the background worker publishes pending rows to the configured exchange
 
 ## Target Boundaries
 
@@ -172,6 +225,7 @@ Refactor the ERP into clearer, cohesive modules without breaking the current API
 3. Payment allocations must be saved before or during completion.
 4. Dashboard responses should return display-ready relations when the UI needs names, not just IDs.
 5. Session state changes must emit one shell-level update path instead of direct DOM mutation from many files.
+6. Core cross-domain orchestration must happen in domain services with outbox events, not in compatibility routes.
 
 ## Remaining Extraction Work
 
@@ -192,15 +246,11 @@ Refactor the ERP into clearer, cohesive modules without breaking the current API
 
 ## Recommended Next Iteration
 
-1. Create `commercial contracts` DTO folder shared by quote/invoice/payment UI modules.
-2. Extract `tax and compliance` backend routes from `erp-expansion`.
-3. Add integration tests for:
-   - login + remember me
-   - settings sequences + integrations compatibility endpoints
-   - quote to invoice conversion
-   - payment save + complete with allocations
-4. Add frontend smoke tests for:
-   - user badge sync after login
-   - role-aware navigation rendering
-   - finance reporting routes
-   - quote/invoice/payment happy paths
+1. Add `tenders`, `contracts`, `subcontractors`, and `documents` domain services under the same namespace-first pattern instead of extending compatibility buckets.
+2. Expand branch isolation from schema support to actual query scoping and role-based branch access.
+3. Add event consumers with `EventConsumption` idempotency checks for:
+   - claim to invoice draft/issue
+   - payroll to project labor cost beyond the current synchronous distribution endpoint
+   - purchase receipt to inventory/project cost
+4. Move the remaining `tax`, `currency`, and operational compatibility write paths out of `erp-expansion` and `api-compat`.
+5. Add frontend smoke tests for the new legal namespaces and the document attachment counters.

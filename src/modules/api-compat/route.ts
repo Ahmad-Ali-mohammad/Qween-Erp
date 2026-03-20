@@ -11,8 +11,12 @@ import * as paymentService from '../payments/service';
 import * as purchaseOrderService from '../purchase-orders/service';
 import * as quoteService from '../quotes/service';
 import * as taxDeclarationService from '../tax-declarations/service';
+import * as budgetingService from '../budgeting/service';
 import { applyLedgerLines } from '../shared/ledger';
 import { resolvePostingAccounts } from '../shared/posting-accounts';
+import { buildSalesForecastFromInvoices } from '../analytics/sales-forecast.service';
+import { getAssistantSuggestions, queryAssistant } from '../assistant/service';
+import { AuthRequest } from '../../types/auth';
 
 const router = Router();
 
@@ -1333,19 +1337,18 @@ router.get('/reports/customer-lifetime-value', async (_req: Request, res: Respon
   ok(res, rows.map((c) => ({ id: c.id, code: c.code, nameAr: c.nameAr, estimatedClv: Number(c.currentBalance) * 12 })));
 });
 
-router.get('/reports/sales-forecast', async (_req: Request, res: Response) => {
+router.get('/reports/sales-forecast', async (req: Request, res: Response) => {
+  const branchId = Number(req.query.branchId ?? 0);
   const rows = await prisma.invoice.findMany({
-    where: { type: 'SALES', status: { in: ['ISSUED', 'PAID', 'PARTIAL'] } },
+    where: {
+      type: 'SALES',
+      status: { in: ['ISSUED', 'PAID', 'PARTIAL'] },
+      ...(branchId > 0 ? { branchId } : {})
+    },
+    select: { date: true, total: true },
     orderBy: { date: 'asc' }
   });
-  const byMonth = new Map<string, number>();
-  for (const row of rows) {
-    const key = monthKey(new Date(row.date));
-    byMonth.set(key, (byMonth.get(key) ?? 0) + Number(row.total));
-  }
-  const history = Array.from(byMonth.entries()).map(([period, amount]) => ({ period, amount }));
-  const avg = history.length ? history.reduce((s, r) => s + r.amount, 0) / history.length : 0;
-  ok(res, { history, forecastNextMonth: avg });
+  ok(res, buildSalesForecastFromInvoices(rows));
 });
 
 router.get('/reports/balanced-scorecard', async (_req: Request, res: Response) => {
@@ -2065,47 +2068,34 @@ router.get('/reports/bank-reconciliation', async (_req: Request, res: Response) 
 
 router.post('/budgets/:id/approve', async (req: Request, res: Response) => {
   const id = parsePositiveInt(req.params.id, 'budgetId');
-  ok(res, await prisma.budget.update({ where: { id }, data: { status: 'ACTIVE' } }));
+  ok(res, await budgetingService.approveLegacyBudget(id, Number((req as AuthRequest).user?.id ?? 0)));
 });
 
 router.get('/budget-lines', async (req: Request, res: Response) => {
-  const where: any = {};
-  if (req.query.budgetId) where.budgetId = Number(req.query.budgetId);
-  ok(res, await prisma.budgetLine.findMany({ where, orderBy: [{ budgetId: 'desc' }, { period: 'asc' }] }));
+  ok(res, await budgetingService.listLegacyBudgetLines(req.query));
 });
 
 router.post('/budget-lines', async (req: Request, res: Response) => {
-  ok(res, await prisma.budgetLine.create({ data: req.body }), undefined, 201);
+  ok(res, await budgetingService.createLegacyBudgetLine(req.body, Number((req as AuthRequest).user?.id ?? 0)), undefined, 201);
 });
 
 router.put('/budget-lines/:id', async (req: Request, res: Response) => {
   const id = parsePositiveInt(req.params.id, 'budgetLineId');
-  ok(res, await prisma.budgetLine.update({ where: { id }, data: req.body }));
+  ok(res, await budgetingService.updateLegacyBudgetLine(id, req.body, Number((req as AuthRequest).user?.id ?? 0)));
 });
 
 router.delete('/budget-lines/:id', async (req: Request, res: Response) => {
   const id = parsePositiveInt(req.params.id, 'budgetLineId');
-  await prisma.budgetLine.delete({ where: { id } });
-  ok(res, { deleted: true });
+  ok(res, await budgetingService.deleteLegacyBudgetLine(id));
 });
 
 router.get('/reports/budget-variance/:budgetId', async (req: Request, res: Response) => {
   const budgetId = parsePositiveInt(req.params.budgetId, 'budgetId');
-  const lines = await prisma.budgetLine.findMany({ where: { budgetId }, include: { account: true }, orderBy: { period: 'asc' } });
-  const summary = lines.reduce(
-    (acc, row) => {
-      acc.budget += Number(row.amount);
-      acc.actual += Number(row.actual);
-      acc.variance += Number(row.variance);
-      return acc;
-    },
-    { budget: 0, actual: 0, variance: 0 }
-  );
-  ok(res, { summary, lines });
+  ok(res, await budgetingService.getLegacyBudgetVariance(budgetId));
 });
 
 router.get('/reports/budget-summary', async (_req: Request, res: Response) => {
-  ok(res, await prisma.budget.findMany({ orderBy: { id: 'desc' } }));
+  ok(res, await budgetingService.listLegacyBudgetSummary());
 });
 
 router.get('/reports/sales-by-product', async (_req: Request, res: Response) => {
@@ -2510,12 +2500,16 @@ router.get('/knowledge-base/search', async (req: Request, res: Response) => {
   ok(res, helpArticles.filter((a) => a.title.toLowerCase().includes(q) || a.content.toLowerCase().includes(q)));
 });
 
-router.post('/assistant/query', async (req: Request, res: Response) => {
-  ok(res, { answer: `تم استلام سؤالك: ${String(req.body?.query ?? '')}`, suggestions: ['افتح شاشة القيود', 'راجع تقرير المبيعات'] });
+router.post('/assistant/query', async (req: AuthRequest, res: Response) => {
+  const query = String(req.body?.query ?? '').trim();
+  if (!query) throw Errors.validation('سؤال المساعد مطلوب');
+
+  const history = Array.isArray(req.body?.history) ? req.body.history : [];
+  ok(res, await queryAssistant({ query, history, user: req.user }));
 });
 
-router.get('/assistant/suggest', async (_req: Request, res: Response) => {
-  ok(res, ['إصدار فاتورة جديدة', 'تشغيل ميزان المراجعة', 'مراجعة المهام المعلقة']);
+router.get('/assistant/suggest', async (req: AuthRequest, res: Response) => {
+  ok(res, await getAssistantSuggestions(req.user));
 });
 
 router.get('/setup-wizard/steps', async (_req: Request, res: Response) => {

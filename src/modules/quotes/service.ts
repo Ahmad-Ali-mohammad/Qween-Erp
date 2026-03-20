@@ -1,4 +1,5 @@
 import { prisma } from '../../config/database';
+import { enqueueOutboxEvent } from '../../platform/events/outbox';
 import { buildSequentialNumber } from '../../utils/id-generator';
 import { Errors } from '../../utils/response';
 import * as invoiceService from '../invoices/service';
@@ -14,6 +15,20 @@ async function generateQuoteNumber(): Promise<string> {
     }
   });
   return buildSequentialNumber('QUOT', count, year);
+}
+
+function resolveQuoteApprovalStatus(status: string) {
+  switch (status) {
+    case 'SENT':
+      return 'PENDING';
+    case 'ACCEPTED':
+    case 'CONVERTED':
+      return 'APPROVED';
+    case 'REJECTED':
+      return 'REJECTED';
+    default:
+      return 'DRAFT';
+  }
 }
 
 function calcQuoteLines(lines: any[]) {
@@ -73,19 +88,40 @@ export async function createQuote(data: any, userId: number) {
   const calc = calcQuoteLines(data.lines);
   const number = await generateQuoteNumber();
 
-  return prisma.salesQuote.create({
-    data: {
-      number,
-      customerId: data.customerId,
-      date: new Date(),
-      validUntil: data.validUntil ? new Date(data.validUntil) : null,
-      subtotal: calc.subtotal,
-      discount: calc.discount,
-      taxAmount: calc.taxAmount,
-      total: calc.total,
-      notes: data.notes,
-      lines: calc.mapped
-    }
+  return prisma.$transaction(async (tx) => {
+    const quote = await tx.salesQuote.create({
+      data: {
+        number,
+        branchId: data.branchId,
+        customerId: data.customerId,
+        date: new Date(),
+        validUntil: data.validUntil ? new Date(data.validUntil) : null,
+        subtotal: calc.subtotal,
+        discount: calc.discount,
+        taxAmount: calc.taxAmount,
+        total: calc.total,
+        notes: data.notes,
+        lines: calc.mapped
+      }
+    });
+
+    await enqueueOutboxEvent(tx, {
+      eventType: 'crm.quote.created',
+      aggregateType: 'SalesQuote',
+      aggregateId: String(quote.id),
+      actorId: userId,
+      branchId: quote.branchId,
+      correlationId: `quote:${quote.id}:created`,
+      payload: {
+        quoteId: quote.id,
+        number: quote.number,
+        customerId: quote.customerId,
+        total: quote.total,
+        status: quote.status
+      }
+    });
+
+    return quote;
   });
 }
 
@@ -102,6 +138,7 @@ export async function updateQuote(id: number, data: any) {
   return prisma.salesQuote.update({
     where: { id },
     data: {
+      branchId: data.branchId ?? quote.branchId,
       validUntil: data.validUntil ? new Date(data.validUntil) : quote.validUntil,
       subtotal: calc.subtotal,
       discount: calc.discount,
@@ -119,6 +156,7 @@ export async function listQuotes(query: any) {
   const skip = (page - 1) * limit;
 
   const where: any = {};
+  if (query.branchId) where.branchId = Number(query.branchId);
   if (query.customerId) where.customerId = Number(query.customerId);
   if (query.status) where.status = query.status;
   if (query.dateFrom || query.dateTo) {
@@ -161,17 +199,38 @@ export async function getQuote(id: number) {
 }
 
 export async function sendQuote(id: number, userId: number) {
-  const quote = await prisma.salesQuote.findUnique({
-    where: { id }
-  });
-  if (!quote) throw Errors.notFound('عرض السعر غير موجود');
-  if (quote.status !== 'DRAFT') throw Errors.business('يمكن إرسال المسودة فقط');
+  return prisma.$transaction(async (tx) => {
+    const quote = await tx.salesQuote.findUnique({
+      where: { id }
+    });
+    if (!quote) throw Errors.notFound('عرض السعر غير موجود');
+    if (quote.status !== 'DRAFT') throw Errors.business('يمكن إرسال المسودة فقط');
 
-  return prisma.salesQuote.update({
-    where: { id },
-    data: {
-      status: 'SENT'
-    }
+    const updated = await tx.salesQuote.update({
+      where: { id },
+      data: {
+        status: 'SENT',
+        approvalStatus: 'PENDING'
+      }
+    });
+
+    await enqueueOutboxEvent(tx, {
+      eventType: 'crm.quote.sent',
+      aggregateType: 'SalesQuote',
+      aggregateId: String(updated.id),
+      actorId: userId,
+      branchId: updated.branchId,
+      correlationId: `quote:${updated.id}:sent`,
+      payload: {
+        quoteId: updated.id,
+        number: updated.number,
+        customerId: updated.customerId,
+        total: updated.total,
+        status: updated.status
+      }
+    });
+
+    return updated;
   });
 }
 
@@ -189,6 +248,7 @@ export async function convertToInvoice(id: number, userId: number) {
   const invoice = await invoiceService.createInvoice(
     {
       type: 'SALES',
+      branchId: quote.branchId ?? undefined,
       customerId: quote.customerId,
       date: new Date(quote.date).toISOString().slice(0, 10),
       dueDate: quote.validUntil ? new Date(quote.validUntil).toISOString().slice(0, 10) : undefined,
@@ -207,7 +267,8 @@ export async function convertToInvoice(id: number, userId: number) {
   const updatedQuote = await prisma.salesQuote.update({
     where: { id },
     data: {
-      status: 'CONVERTED'
+      status: 'CONVERTED',
+      approvalStatus: 'APPROVED'
     }
   });
 
@@ -227,7 +288,10 @@ export async function updateQuoteStatus(id: number, status: string) {
 
   return prisma.salesQuote.update({
     where: { id },
-    data: { status }
+    data: {
+      status,
+      approvalStatus: resolveQuoteApprovalStatus(status)
+    }
   });
 }
 

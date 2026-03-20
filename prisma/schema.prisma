@@ -106,6 +106,36 @@ enum TaxDeclarationStatus {
   CANCELLED
 }
 
+enum ApprovalLifecycleStatus {
+  DRAFT
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum PostingLifecycleStatus {
+  UNPOSTED
+  POSTED
+  REVERSED
+  NOT_APPLICABLE
+}
+
+enum DocumentProvider {
+  LOCAL
+  S3
+}
+
+enum DocumentStatus {
+  ACTIVE
+  ARCHIVED
+}
+
+enum OutboxStatus {
+  PENDING
+  PUBLISHED
+  FAILED
+}
+
 model CompanyProfile {
   id                      Int      @id @default(1)
   nameAr                  String
@@ -169,6 +199,148 @@ model User {
   invoicesCreated  Invoice[]      @relation("InvoiceCreatedBy")
   paymentsCreated  Payment[]      @relation("PaymentCreatedBy")
   auditLogs        AuditLog[]
+  documentsUploaded Document[]    @relation("DocumentUploadedBy")
+  outboxEventsAuthored OutboxEvent[] @relation("OutboxEventActor")
+  branchAccesses   UserBranchAccess[]
+}
+
+model Branch {
+  id                Int      @id @default(autoincrement())
+  code              String   @unique
+  nameAr            String
+  nameEn            String?
+  city              String?
+  address           String?
+  phone             String?
+  email             String?
+  isActive          Boolean  @default(true)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  approvalWorkflows ApprovalWorkflow[]
+  attendances       Attendance[]
+  contracts         Contract[]
+  customers         Customer[]
+  documents         Document[]
+  employees         Employee[]
+  fixedAssets       FixedAsset[]
+  invoices          Invoice[]
+  outboxEvents      OutboxEvent[]
+  payments          Payment[]
+  printAudits       PrintAudit[]
+  printJobs         PrintJob[]
+  printTemplates    PrintTemplate[]
+  exportJobs        ExportJob[]
+  conversionJobs    ConversionJob[]
+  payrollLines      PayrollLine[]
+  payrollRuns       PayrollRun[]
+  projects          Project[]
+  purchaseOrders    PurchaseOrder[]
+  purchaseReturns   PurchaseReturn[]
+  salesQuotes       SalesQuote[]
+  salesReturns      SalesReturn[]
+  siteAttendances   SiteAttendance[]
+  siteDailyLogs     SiteDailyLog[]
+  siteIssues        SiteIssue[]
+  siteMaterialRequests SiteMaterialRequest[]
+  sitePhotos        SitePhoto[]
+  siteProgressReports SiteProgress[]
+  subcontracts      Subcontract[]
+  suppliers         Supplier[]
+  tenders           Tender[]
+  timesheets        Timesheet[]
+  userBranchAccesses UserBranchAccess[]
+  warehouses        Warehouse[]
+}
+
+model ApprovalWorkflow {
+  id              Int      @id @default(autoincrement())
+  code            String   @unique
+  nameAr          String
+  nameEn          String?
+  entityType      String
+  branchId        Int?
+  branch          Branch?  @relation(fields: [branchId], references: [id])
+  thresholdAmount Decimal?
+  isActive        Boolean  @default(true)
+  steps           Json     @default("{}")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([entityType])
+  @@index([branchId])
+}
+
+model Document {
+  id            Int              @id @default(autoincrement())
+  module        String
+  entityType    String
+  entityId      String
+  branchId      Int?
+  branch        Branch?          @relation(fields: [branchId], references: [id])
+  status        DocumentStatus   @default(ACTIVE)
+  provider      DocumentProvider @default(LOCAL)
+  fileName      String
+  originalName  String?
+  mimeType      String
+  sizeBytes     Int              @default(0)
+  bucket        String?
+  storageKey    String
+  checksum      String?
+  ocrText       String?
+  metadata      Json             @default("{}")
+  versionNumber Int              @default(1)
+  uploadedById  Int?
+  uploadedBy    User?            @relation("DocumentUploadedBy", fields: [uploadedById], references: [id])
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+
+  @@index([module, entityType, entityId])
+  @@index([branchId])
+  @@unique([storageKey, versionNumber])
+}
+
+model OutboxEvent {
+  id            Int          @id @default(autoincrement())
+  eventId       String       @unique @default(uuid())
+  eventType     String
+  aggregateType String
+  aggregateId   String
+  occurredAt    DateTime     @default(now())
+  actorId       Int?
+  actor         User?        @relation("OutboxEventActor", fields: [actorId], references: [id])
+  branchId      Int?
+  branch        Branch?      @relation(fields: [branchId], references: [id])
+  correlationId String?
+  version       Int          @default(1)
+  payload       Json
+  status        OutboxStatus @default(PENDING)
+  retryCount    Int          @default(0)
+  lastError     String?
+  publishedAt   DateTime?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  consumptions EventConsumption[]
+
+  @@index([status, createdAt])
+  @@index([aggregateType, aggregateId])
+  @@index([branchId])
+}
+
+model EventConsumption {
+  id            Int         @id @default(autoincrement())
+  consumerName  String
+  eventId       String
+  outboxEventId Int?
+  outboxEvent   OutboxEvent? @relation(fields: [outboxEventId], references: [id], onDelete: SetNull)
+  status        String      @default("CONSUMED")
+  result        Json?
+  errorMessage  String?
+  consumedAt    DateTime    @default(now())
+
+  @@unique([consumerName, eventId])
+  @@index([outboxEventId])
 }
 
 model AuthSession {
@@ -317,12 +489,17 @@ model Project {
   code        String   @unique
   nameAr      String
   nameEn      String?
+  branchId    Int?
+  branch      Branch?  @relation(fields: [branchId], references: [id])
+  contractId  Int?
+  contract    Contract? @relation(fields: [contractId], references: [id])
   type        String?
   status      String   @default("Active")
   startDate   DateTime?
   endDate     DateTime?
   budget      Decimal?
   actualCost  Decimal  @default(0)
+  attachmentsCount Int @default(0)
   managerId   Int?
   description String?
   isActive    Boolean  @default(true)
@@ -331,6 +508,19 @@ model Project {
 
   journalLines JournalLine[]
   invoices     Invoice[]
+  projectExpenses ProjectExpense[]
+  projectTasks    ProjectTask[]
+  siteAttendances SiteAttendance[]
+  siteDailyLogs   SiteDailyLog[]
+  siteIssues      SiteIssue[]
+  siteMaterialRequests SiteMaterialRequest[]
+  sitePhotos      SitePhoto[]
+  siteProgressReports SiteProgress[]
+  subcontracts    Subcontract[]
+  timesheets      Timesheet[]
+
+  @@index([branchId])
+  @@index([contractId])
 }
 
 model Department {
@@ -365,6 +555,8 @@ model Customer {
   code           String   @unique
   nameAr         String
   nameEn         String?
+  branchId       Int?
+  branch         Branch?  @relation(fields: [branchId], references: [id])
   type           String   @default("Company")
   nationalId     String?
   taxNumber      String?
@@ -377,6 +569,7 @@ model Customer {
   creditLimit    Decimal  @default(0)
   currentBalance Decimal  @default(0)
   paymentTerms   Int      @default(30)
+  attachmentsCount Int    @default(0)
   isActive       Boolean  @default(true)
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
@@ -384,6 +577,9 @@ model Customer {
   invoices Invoice[]
   payments Payment[]
   contacts Contact[]
+  tenders  Tender[]
+
+  @@index([branchId])
 }
 
 model Supplier {
@@ -391,6 +587,8 @@ model Supplier {
   code           String   @unique
   nameAr         String
   nameEn         String?
+  branchId       Int?
+  branch         Branch?  @relation(fields: [branchId], references: [id])
   type           String   @default("Local")
   nationalId     String?
   taxNumber      String?
@@ -406,6 +604,7 @@ model Supplier {
   bankName       String?
   bankAccount    String?
   iban           String?
+  attachmentsCount Int    @default(0)
   isActive       Boolean  @default(true)
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
@@ -413,6 +612,9 @@ model Supplier {
   invoices Invoice[]
   payments Payment[]
   contacts Contact[]
+  subcontracts Subcontract[]
+
+  @@index([branchId])
 }
 
 model Contact {
@@ -440,6 +642,8 @@ model Invoice {
   type             InvoiceType
   date             DateTime
   dueDate          DateTime?
+  branchId         Int?
+  branch           Branch?      @relation(fields: [branchId], references: [id])
   customerId       Int?
   customer         Customer?    @relation(fields: [customerId], references: [id])
   supplierId       Int?
@@ -455,10 +659,13 @@ model Invoice {
   outstanding      Decimal      @default(0)
   status           InvoiceStatus @default(DRAFT)
   paymentStatus    String       @default("PENDING")
+  approvalStatus   ApprovalLifecycleStatus @default(DRAFT)
+  postingStatus    PostingLifecycleStatus  @default(UNPOSTED)
   projectId        Int?
   project          Project?     @relation(fields: [projectId], references: [id])
   notes            String?
   internalNotes    String?
+  attachmentsCount Int          @default(0)
   zatcaUuid        String?
   zatcaHash        String?
   zatcaQr          String?
@@ -472,9 +679,11 @@ model Invoice {
 
   lines    InvoiceLine[]
   payments PaymentAllocation[]
+  subcontractIpcs SubcontractIpc[] @relation("SubcontractIpcPayableInvoice")
 
   @@index([date, status])
   @@index([createdAt])
+  @@index([branchId])
 }
 
 model InvoiceLine {
@@ -545,6 +754,8 @@ model Payment {
   type          PaymentType
   method        PaymentMethod
   amount        Decimal
+  branchId      Int?
+  branch        Branch?      @relation(fields: [branchId], references: [id])
   currency      String       @default("SAR")
   bankId        Int?
   bank          BankAccount? @relation(fields: [bankId], references: [id])
@@ -556,8 +767,11 @@ model Payment {
   checkDate     DateTime?
   checkBank     String?
   status        PaymentStatus @default(PENDING)
+  approvalStatus ApprovalLifecycleStatus @default(PENDING)
+  postingStatus  PostingLifecycleStatus  @default(UNPOSTED)
   description   String?
   notes         String?
+  attachmentsCount Int       @default(0)
   journalEntryId Int?
   journalEntry   JournalEntry? @relation("PaymentJournalEntry", fields: [journalEntryId], references: [id])
   createdById   Int?
@@ -569,6 +783,7 @@ model Payment {
 
   @@index([date, status])
   @@index([createdAt])
+  @@index([branchId])
 }
 
 model PaymentAllocation {
@@ -605,6 +820,8 @@ model FixedAsset {
   code                   String     @unique
   nameAr                 String
   nameEn                 String?
+  branchId               Int?
+  branch                 Branch?    @relation(fields: [branchId], references: [id])
   categoryId             Int
   category               AssetCategory @relation(fields: [categoryId], references: [id])
   serialNumber           String?
@@ -619,6 +836,7 @@ model FixedAsset {
   depreciationStart      DateTime?
   accumulatedDepreciation Decimal   @default(0)
   netBookValue           Decimal
+  attachmentsCount       Int        @default(0)
   location               String?
   departmentId           Int?
   custodianId            Int?
@@ -630,6 +848,8 @@ model FixedAsset {
   updatedAt              DateTime   @updatedAt
 
   depreciationSchedule DepreciationSchedule[]
+
+  @@index([branchId])
 }
 
 model DepreciationSchedule {
@@ -681,6 +901,170 @@ model BudgetLine {
   updatedAt DateTime @updatedAt
 
   @@unique([budgetId, accountId, period])
+}
+
+model BudgetScenario {
+  id               Int                     @id @default(autoincrement())
+  code             String                  @unique
+  nameAr           String
+  nameEn           String?
+  fiscalYear       Int
+  branchId         Int?
+  status           String                  @default("DRAFT")
+  approvalStatus   ApprovalLifecycleStatus @default(DRAFT)
+  postingStatus    PostingLifecycleStatus  @default(NOT_APPLICABLE)
+  controlLevel     BudgetControlLevel      @default(NONE)
+  notes            String?
+  attachmentsCount Int                     @default(0)
+  legacyBudgetId   Int?
+  publishedVersionId Int?
+  createdById      Int?
+  updatedById      Int?
+  createdAt        DateTime                @default(now())
+  updatedAt        DateTime                @updatedAt
+
+  versions    BudgetVersion[]
+  allocations BudgetAllocation[]
+  forecasts   ForecastSnapshot[]
+  variances   VarianceEntry[]
+
+  @@index([branchId, fiscalYear])
+  @@index([status, approvalStatus])
+}
+
+model BudgetVersion {
+  id               Int                     @id @default(autoincrement())
+  scenarioId       Int
+  scenario         BudgetScenario          @relation(fields: [scenarioId], references: [id], onDelete: Cascade)
+  label            String
+  versionNumber    Int                     @default(1)
+  effectiveDate    DateTime?
+  status           String                  @default("DRAFT")
+  approvalStatus   ApprovalLifecycleStatus @default(DRAFT)
+  postingStatus    PostingLifecycleStatus  @default(NOT_APPLICABLE)
+  plannedTotal     Decimal                 @default(0)
+  actualTotal      Decimal                 @default(0)
+  committedTotal   Decimal                 @default(0)
+  varianceTotal    Decimal                 @default(0)
+  notes            String?
+  attachmentsCount Int                     @default(0)
+  legacyBudgetId   Int?
+  publishedAt      DateTime?
+  createdById      Int?
+  updatedById      Int?
+  createdAt        DateTime                @default(now())
+  updatedAt        DateTime                @updatedAt
+
+  allocations BudgetAllocation[]
+  forecasts   ForecastSnapshot[]
+  variances   VarianceEntry[]
+
+  @@unique([scenarioId, label])
+  @@unique([scenarioId, versionNumber])
+  @@index([status, approvalStatus])
+}
+
+model BudgetAllocation {
+  id               Int                     @id @default(autoincrement())
+  allocationKey    String                  @unique
+  scenarioId       Int
+  scenario         BudgetScenario          @relation(fields: [scenarioId], references: [id], onDelete: Cascade)
+  versionId        Int
+  version          BudgetVersion           @relation(fields: [versionId], references: [id], onDelete: Cascade)
+  branchId         Int?
+  accountId        Int?
+  projectId        Int?
+  costCenterId     Int?
+  departmentId     Int?
+  contractId       Int?
+  legacyLineId     Int?
+  period           Int
+  plannedAmount    Decimal                 @default(0)
+  actualAmount     Decimal                 @default(0)
+  committedAmount  Decimal                 @default(0)
+  varianceAmount   Decimal                 @default(0)
+  status           String                  @default("ACTIVE")
+  approvalStatus   ApprovalLifecycleStatus @default(DRAFT)
+  postingStatus    PostingLifecycleStatus  @default(NOT_APPLICABLE)
+  attachmentsCount Int                     @default(0)
+  note             String?
+  createdById      Int?
+  updatedById      Int?
+  createdAt        DateTime                @default(now())
+  updatedAt        DateTime                @updatedAt
+
+  variances VarianceEntry[]
+
+  @@index([versionId, period])
+  @@index([accountId, period])
+  @@index([branchId, projectId])
+}
+
+model ForecastSnapshot {
+  id               Int                     @id @default(autoincrement())
+  scenarioId       Int?
+  scenario         BudgetScenario?         @relation(fields: [scenarioId], references: [id], onDelete: SetNull)
+  versionId        Int?
+  version          BudgetVersion?          @relation(fields: [versionId], references: [id], onDelete: SetNull)
+  branchId         Int?
+  snapshotDate     DateTime                @default(now())
+  label            String
+  plannedTotal     Decimal                 @default(0)
+  actualTotal      Decimal                 @default(0)
+  forecastTotal    Decimal                 @default(0)
+  varianceTotal    Decimal                 @default(0)
+  status           String                  @default("SNAPSHOT")
+  approvalStatus   ApprovalLifecycleStatus @default(DRAFT)
+  postingStatus    PostingLifecycleStatus  @default(NOT_APPLICABLE)
+  attachmentsCount Int                     @default(0)
+  notes            String?
+  metadata         Json                    @default("{}")
+  createdById      Int?
+  updatedById      Int?
+  createdAt        DateTime                @default(now())
+  updatedAt        DateTime                @updatedAt
+
+  @@index([scenarioId, snapshotDate])
+  @@index([versionId, snapshotDate])
+}
+
+model VarianceEntry {
+  id               Int                     @id @default(autoincrement())
+  varianceKey      String                  @unique
+  scenarioId       Int?
+  scenario         BudgetScenario?         @relation(fields: [scenarioId], references: [id], onDelete: SetNull)
+  versionId        Int?
+  version          BudgetVersion?          @relation(fields: [versionId], references: [id], onDelete: SetNull)
+  allocationId     Int?
+  allocation       BudgetAllocation?       @relation(fields: [allocationId], references: [id], onDelete: SetNull)
+  branchId         Int?
+  accountId        Int?
+  projectId        Int?
+  costCenterId     Int?
+  departmentId     Int?
+  contractId       Int?
+  legacyLineId     Int?
+  period           Int
+  plannedAmount    Decimal                 @default(0)
+  actualAmount     Decimal                 @default(0)
+  committedAmount  Decimal                 @default(0)
+  varianceAmount   Decimal                 @default(0)
+  severity         String                  @default("INFO")
+  status           String                  @default("OPEN")
+  detectedAt       DateTime                @default(now())
+  resolvedAt       DateTime?
+  note             String?
+  approvalStatus   ApprovalLifecycleStatus @default(DRAFT)
+  postingStatus    PostingLifecycleStatus  @default(NOT_APPLICABLE)
+  attachmentsCount Int                     @default(0)
+  createdById      Int?
+  updatedById      Int?
+  createdAt        DateTime                @default(now())
+  updatedAt        DateTime                @updatedAt
+
+  @@index([scenarioId, status])
+  @@index([versionId, severity])
+  @@index([branchId, projectId])
 }
 
 model TaxCode {
@@ -776,17 +1160,26 @@ model Item {
   isActive        Boolean  @default(true)
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
+
+  siteMaterialRequests SiteMaterialRequest[]
 }
 
 model Warehouse {
   id         Int      @id @default(autoincrement())
   code       String   @unique
   nameAr     String
+  branchId   Int?
+  branch     Branch?  @relation(fields: [branchId], references: [id])
   location   String?
   manager    String?
   isActive   Boolean  @default(true)
+  attachmentsCount Int @default(0)
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
+
+  siteMaterialRequests SiteMaterialRequest[]
+
+  @@index([branchId])
 }
 
 model WarehouseLocation {
@@ -855,8 +1248,12 @@ model SalesQuote {
   id          Int      @id @default(autoincrement())
   number      String   @unique
   date        DateTime @default(now())
+  branchId    Int?
+  branch      Branch?  @relation(fields: [branchId], references: [id])
   customerId  Int?
   status      String   @default("DRAFT")
+  approvalStatus ApprovalLifecycleStatus @default(DRAFT)
+  postingStatus  PostingLifecycleStatus  @default(NOT_APPLICABLE)
   subtotal    Decimal  @default(0)
   discount    Decimal  @default(0)
   taxAmount   Decimal  @default(0)
@@ -864,57 +1261,81 @@ model SalesQuote {
   validUntil  DateTime?
   notes       String?
   lines       Json?
+  attachmentsCount Int @default(0)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+
+  @@index([branchId])
 }
 
 model SalesReturn {
   id             Int      @id @default(autoincrement())
   number         String   @unique
   date           DateTime @default(now())
+  branchId       Int?
+  branch         Branch?  @relation(fields: [branchId], references: [id])
   customerId     Int?
   invoiceId      Int?
   status         String   @default("DRAFT")
+  approvalStatus ApprovalLifecycleStatus @default(DRAFT)
+  postingStatus  PostingLifecycleStatus  @default(UNPOSTED)
   subtotal       Decimal  @default(0)
   taxAmount      Decimal  @default(0)
   total          Decimal  @default(0)
   reason         String?
   lines          Json?
+  attachmentsCount Int    @default(0)
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
+
+  @@index([branchId])
 }
 
 model PurchaseOrder {
   id               Int      @id @default(autoincrement())
   number           String   @unique
+  branchId         Int?
+  branch           Branch?  @relation(fields: [branchId], references: [id])
   supplierId       Int?
   date             DateTime @default(now())
   expectedDate     DateTime?
   status           String   @default("DRAFT")
+  approvalStatus   ApprovalLifecycleStatus @default(DRAFT)
+  postingStatus    PostingLifecycleStatus  @default(NOT_APPLICABLE)
   subtotal         Decimal  @default(0)
   discount         Decimal  @default(0)
   taxAmount        Decimal  @default(0)
   total            Decimal  @default(0)
   notes            String?
+  attachmentsCount Int      @default(0)
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
+
+  @@index([branchId])
 }
 
 model PurchaseReturn {
   id             Int      @id @default(autoincrement())
   number         String   @unique
   date           DateTime @default(now())
+  branchId       Int?
+  branch         Branch?  @relation(fields: [branchId], references: [id])
   supplierId     Int?
   invoiceId      Int?
   status         String   @default("DRAFT")
+  approvalStatus ApprovalLifecycleStatus @default(DRAFT)
+  postingStatus  PostingLifecycleStatus  @default(UNPOSTED)
   subtotal       Decimal  @default(0)
   taxAmount      Decimal  @default(0)
   total          Decimal  @default(0)
   reason         String?
   lines          Json?
+  attachmentsCount Int    @default(0)
   journalEntryId Int?
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
+
+  @@index([branchId])
 }
 
 model PurchaseOrderLine {
@@ -956,6 +1377,78 @@ model Opportunity {
   status           String   @default("OPEN")
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
+
+  tenders          Tender[]
+}
+
+model Tender {
+  id               Int      @id @default(autoincrement())
+  number           String   @unique
+  title            String
+  branchId         Int?
+  branch           Branch?  @relation(fields: [branchId], references: [id])
+  customerId       Int?
+  customer         Customer? @relation(fields: [customerId], references: [id])
+  opportunityId    Int?
+  opportunity      Opportunity? @relation(fields: [opportunityId], references: [id])
+  contractId       Int?
+  projectId        Int?
+  issuerName       String?
+  bidDueDate       DateTime?
+  estimatedValue   Decimal  @default(0)
+  offeredValue     Decimal  @default(0)
+  guaranteeAmount  Decimal  @default(0)
+  status           String   @default("DRAFT")
+  result           String?
+  resultReason     String?
+  notes            String?
+  submittedAt      DateTime?
+  awardedAt        DateTime?
+  resultRecordedAt DateTime?
+  approvalStatus   ApprovalLifecycleStatus @default(DRAFT)
+  postingStatus    PostingLifecycleStatus  @default(NOT_APPLICABLE)
+  attachmentsCount Int      @default(0)
+  createdById      Int?
+  updatedById      Int?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  estimateLines    TenderEstimateLine[]
+  competitors      TenderCompetitor[]
+
+  @@index([branchId])
+  @@index([customerId])
+  @@index([opportunityId])
+  @@index([status])
+  @@index([result])
+}
+
+model TenderEstimateLine {
+  id          Int      @id @default(autoincrement())
+  tenderId    Int
+  tender      Tender   @relation(fields: [tenderId], references: [id], onDelete: Cascade)
+  lineNumber  Int
+  category    String?
+  description String
+  costType    String?
+  quantity    Decimal  @default(0)
+  unitCost    Decimal  @default(0)
+  totalCost   Decimal  @default(0)
+  createdAt   DateTime @default(now())
+
+  @@unique([tenderId, lineNumber])
+}
+
+model TenderCompetitor {
+  id           Int      @id @default(autoincrement())
+  tenderId     Int
+  tender       Tender   @relation(fields: [tenderId], references: [id], onDelete: Cascade)
+  name         String
+  offeredValue Decimal?
+  rank         Int?
+  isWinner     Boolean  @default(false)
+  notes        String?
+  createdAt    DateTime @default(now())
 }
 
 model SupportTicket {
@@ -983,6 +1476,7 @@ model SupportTicketMessage {
 model ProjectTask {
   id          Int      @id @default(autoincrement())
   projectId   Int?
+  project     Project? @relation(fields: [projectId], references: [id], onDelete: Cascade)
   title       String
   description String?
   assigneeId  Int?
@@ -999,18 +1493,24 @@ model ProjectTask {
 model ProjectExpense {
   id          Int      @id @default(autoincrement())
   projectId   Int?
+  project     Project? @relation(fields: [projectId], references: [id], onDelete: Cascade)
   date        DateTime @default(now())
   category    String?
   description String?
   amount      Decimal  @default(0)
   reference   String?
   createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  timesheets  Timesheet[]
 }
 
 model Employee {
   id             Int      @id @default(autoincrement())
   code           String   @unique
   fullName       String
+  branchId       Int?
+  branch         Branch?  @relation(fields: [branchId], references: [id])
   email          String?  @unique
   phone          String?
   department     String?
@@ -1020,8 +1520,16 @@ model Employee {
   baseSalary     Decimal  @default(0)
   allowances     Decimal  @default(0)
   bankAccountIban String?
+  attachmentsCount Int    @default(0)
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
+
+  attendances    Attendance[]
+  payrollLines   PayrollLine[]
+  siteAttendances SiteAttendance[]
+  timesheets     Timesheet[]
+
+  @@index([branchId])
 }
 
 model LeaveRequest {
@@ -1051,22 +1559,38 @@ model PayrollRun {
   runDate     DateTime?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+  branchId    Int?
+  branch      Branch?  @relation(fields: [branchId], references: [id])
+
+  lines       PayrollLine[]
+
+  @@index([branchId, year, month])
 }
 
 model PayrollLine {
   id            Int      @id @default(autoincrement())
   payrollRunId  Int
+  payrollRun    PayrollRun @relation(fields: [payrollRunId], references: [id], onDelete: Cascade)
   employeeId    Int
+  employee      Employee   @relation(fields: [employeeId], references: [id], onDelete: Cascade)
   basicSalary   Decimal  @default(0)
   allowances    Decimal  @default(0)
   overtime      Decimal  @default(0)
   deductions    Decimal  @default(0)
   netSalary     Decimal  @default(0)
+  branchId      Int?
+  branch        Branch?   @relation(fields: [branchId], references: [id])
+
+  @@index([branchId])
+  @@index([employeeId])
+  @@index([payrollRunId])
 }
 
 model Contract {
   id          Int      @id @default(autoincrement())
   number      String   @unique
+  branchId    Int?
+  branch      Branch?  @relation(fields: [branchId], references: [id])
   title       String
   partyType   String
   partyId     Int?
@@ -1075,9 +1599,17 @@ model Contract {
   endDate     DateTime?
   value       Decimal  @default(0)
   status      String   @default("DRAFT")
+  approvalStatus ApprovalLifecycleStatus @default(DRAFT)
+  postingStatus  PostingLifecycleStatus  @default(NOT_APPLICABLE)
   terms       String?
+  attachmentsCount Int @default(0)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+
+  projects    Project[]
+
+  @@index([branchId])
+  @@index([branchId, status])
 }
 
 model ContractMilestone {
@@ -1088,6 +1620,978 @@ model ContractMilestone {
   amount      Decimal  @default(0)
   status      String   @default("PENDING")
   notes       String?
+}
+
+model Subcontract {
+  id                Int      @id @default(autoincrement())
+  number            String   @unique
+  branchId          Int?
+  branch            Branch?  @relation(fields: [branchId], references: [id])
+  supplierId        Int
+  supplier          Supplier @relation(fields: [supplierId], references: [id])
+  projectId         Int
+  project           Project  @relation(fields: [projectId], references: [id])
+  title             String
+  scope             String?
+  workOrderNumber   String?
+  startDate         DateTime?
+  endDate           DateTime?
+  contractValue     Decimal  @default(0)
+  certifiedAmount   Decimal  @default(0)
+  paidAmount        Decimal  @default(0)
+  retentionHeld     Decimal  @default(0)
+  outstandingAmount Decimal  @default(0)
+  retentionRate     Decimal  @default(0)
+  status            String   @default("DRAFT")
+  approvalStatus    ApprovalLifecycleStatus @default(DRAFT)
+  postingStatus     PostingLifecycleStatus  @default(NOT_APPLICABLE)
+  attachmentsCount  Int      @default(0)
+  performanceRating Int?
+  notes             String?
+  activatedAt       DateTime?
+  createdById       Int?
+  updatedById       Int?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  ipcs              SubcontractIpc[]
+
+  @@index([branchId])
+  @@index([supplierId])
+  @@index([projectId])
+  @@index([status])
+}
+
+model SubcontractIpc {
+  id                      Int      @id @default(autoincrement())
+  subcontractId           Int
+  subcontract             Subcontract @relation(fields: [subcontractId], references: [id], onDelete: Cascade)
+  number                  String   @unique
+  certificateDate         DateTime
+  periodStart             DateTime?
+  periodEnd               DateTime?
+  claimedAmount           Decimal  @default(0)
+  previousCertifiedAmount Decimal  @default(0)
+  certifiedAmount         Decimal  @default(0)
+  retentionRate           Decimal  @default(0)
+  retentionAmount         Decimal  @default(0)
+  netAmount               Decimal  @default(0)
+  status                  String   @default("DRAFT")
+  approvalStatus          ApprovalLifecycleStatus @default(DRAFT)
+  postingStatus           PostingLifecycleStatus  @default(UNPOSTED)
+  payableInvoiceId        Int?
+  payableInvoice          Invoice? @relation("SubcontractIpcPayableInvoice", fields: [payableInvoiceId], references: [id])
+  submittedAt             DateTime?
+  approvedAt              DateTime?
+  paidAt                  DateTime?
+  notes                   String?
+  attachmentsCount        Int      @default(0)
+  createdById             Int?
+  updatedById             Int?
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+
+  @@index([subcontractId])
+  @@index([status])
+  @@index([approvalStatus])
+  @@index([payableInvoiceId])
+}
+
+model SiteDailyLog {
+  id               Int       @id @default(autoincrement())
+  number           String    @unique
+  branchId         Int?
+  branch           Branch?   @relation(fields: [branchId], references: [id])
+  projectId        Int
+  project          Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  logDate          DateTime
+  weather          String?
+  workforceCount   Int       @default(0)
+  equipmentSummary String?
+  workExecuted     String?
+  blockers         String?
+  notes            String?
+  status           String    @default("DRAFT")
+  approvalStatus   String    @default("DRAFT")
+  postingStatus    String    @default("NOT_APPLICABLE")
+  attachmentsCount Int       @default(0)
+  createdById      Int?
+  updatedById      Int?
+  submittedAt      DateTime?
+  approvedAt       DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  issues            SiteIssue[]
+  materialRequests  SiteMaterialRequest[]
+  photos            SitePhoto[]
+  progressReports   SiteProgress[]
+
+  @@index([branchId, logDate])
+  @@index([projectId, logDate])
+  @@index([status, approvalStatus])
+}
+
+model SiteMaterialRequest {
+  id               Int       @id @default(autoincrement())
+  number           String    @unique
+  branchId         Int?
+  branch           Branch?   @relation(fields: [branchId], references: [id])
+  projectId        Int
+  project          Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  dailyLogId       Int?
+  dailyLog         SiteDailyLog? @relation(fields: [dailyLogId], references: [id], onDelete: SetNull)
+  itemId           Int?
+  item             Item?     @relation(fields: [itemId], references: [id], onDelete: SetNull)
+  warehouseId      Int?
+  warehouse        Warehouse? @relation(fields: [warehouseId], references: [id], onDelete: SetNull)
+  requestDate      DateTime  @default(now())
+  requiredBy       DateTime?
+  quantity         Decimal   @default(0)
+  issuedQuantity   Decimal   @default(0)
+  unit             String?
+  purpose          String?
+  sourceMode       String?
+  status           String    @default("DRAFT")
+  approvalStatus   String    @default("DRAFT")
+  postingStatus    String    @default("UNPOSTED")
+  attachmentsCount Int       @default(0)
+  notes            String?
+  createdById      Int?
+  updatedById      Int?
+  submittedAt      DateTime?
+  approvedAt       DateTime?
+  fulfilledAt      DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  @@index([branchId, requestDate])
+  @@index([projectId, status])
+  @@index([itemId, warehouseId])
+}
+
+model SiteProgress {
+  id               Int       @id @default(autoincrement())
+  branchId         Int?
+  branch           Branch?   @relation(fields: [branchId], references: [id])
+  projectId        Int
+  project          Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  dailyLogId       Int?
+  dailyLog         SiteDailyLog? @relation(fields: [dailyLogId], references: [id], onDelete: SetNull)
+  reportDate       DateTime  @default(now())
+  wbsCode          String?
+  taskName         String
+  plannedPercent   Decimal   @default(0)
+  actualPercent    Decimal   @default(0)
+  executedQty      Decimal   @default(0)
+  unit             String?
+  status           String    @default("OPEN")
+  approvalStatus   String    @default("DRAFT")
+  postingStatus    String    @default("NOT_APPLICABLE")
+  attachmentsCount Int       @default(0)
+  notes            String?
+  createdById      Int?
+  updatedById      Int?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  @@index([branchId, reportDate])
+  @@index([projectId, reportDate])
+}
+
+model SiteIssue {
+  id                  Int       @id @default(autoincrement())
+  number              String    @unique
+  branchId            Int?
+  branch              Branch?   @relation(fields: [branchId], references: [id])
+  projectId           Int
+  project             Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  dailyLogId          Int?
+  dailyLog            SiteDailyLog? @relation(fields: [dailyLogId], references: [id], onDelete: SetNull)
+  issueDate           DateTime  @default(now())
+  category            String    @default("GENERAL")
+  severity            String    @default("MEDIUM")
+  title               String
+  description         String?
+  status              String    @default("OPEN")
+  approvalStatus      String    @default("DRAFT")
+  postingStatus       String    @default("NOT_APPLICABLE")
+  attachmentsCount    Int       @default(0)
+  reportedByEmployeeId Int?
+  resolvedByEmployeeId Int?
+  dueDate             DateTime?
+  resolvedAt          DateTime?
+  notes               String?
+  createdById         Int?
+  updatedById         Int?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  photos SitePhoto[]
+
+  @@index([branchId, status, severity])
+  @@index([projectId, issueDate])
+}
+
+model SitePhoto {
+  id               Int       @id @default(autoincrement())
+  branchId         Int?
+  branch           Branch?   @relation(fields: [branchId], references: [id])
+  projectId        Int
+  project          Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  dailyLogId       Int?
+  dailyLog         SiteDailyLog? @relation(fields: [dailyLogId], references: [id], onDelete: SetNull)
+  issueId          Int?
+  issue            SiteIssue? @relation(fields: [issueId], references: [id], onDelete: SetNull)
+  capturedAt       DateTime  @default(now())
+  fileName         String
+  fileUrl          String
+  caption          String?
+  status           String    @default("ACTIVE")
+  approvalStatus   String    @default("DRAFT")
+  postingStatus    String    @default("NOT_APPLICABLE")
+  attachmentsCount Int       @default(1)
+  createdById      Int?
+  updatedById      Int?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  @@index([projectId, capturedAt])
+  @@index([issueId])
+}
+
+model SiteAttendance {
+  id               Int       @id @default(autoincrement())
+  branchId         Int?
+  branch           Branch?   @relation(fields: [branchId], references: [id])
+  projectId        Int
+  project          Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  employeeId       Int
+  employee         Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  date             DateTime
+  checkIn          DateTime?
+  checkOut         DateTime?
+  hoursWorked      Decimal   @default(0)
+  shift            String?
+  status           String    @default("PRESENT")
+  source           String    @default("SITE")
+  approvalStatus   String    @default("DRAFT")
+  postingStatus    String    @default("NOT_APPLICABLE")
+  attachmentsCount Int       @default(0)
+  notes            String?
+  createdById      Int?
+  updatedById      Int?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  @@unique([employeeId, projectId, date])
+  @@index([branchId, date])
+  @@index([projectId, date])
+}
+
+model PrintTemplate {
+  id               Int                     @id @default(autoincrement())
+  key              String                  @unique
+  title            String
+  entityType       String
+  defaultFormat    String                  @default("PDF")
+  templateHtml     String
+  templateJson     Json?
+  status           String                  @default("ACTIVE")
+  approvalStatus   ApprovalLifecycleStatus @default(DRAFT)
+  postingStatus    PostingLifecycleStatus  @default(NOT_APPLICABLE)
+  attachmentsCount Int                     @default(0)
+  branchId         Int?
+  branch           Branch?                 @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  createdById      Int?
+  updatedById      Int?
+  createdAt        DateTime                @default(now())
+  updatedAt        DateTime                @updatedAt
+
+  printJobs PrintJob[]
+
+  @@index([branchId, status])
+  @@index([entityType, status])
+}
+
+model PrintJob {
+  id               Int                     @id @default(autoincrement())
+  number           String                  @unique
+  branchId         Int?
+  branch           Branch?                 @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  templateId       Int?
+  template         PrintTemplate?          @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  entityType       String
+  entityId         String?
+  outputFormat     String                  @default("PDF")
+  status           String                  @default("QUEUED")
+  approvalStatus   ApprovalLifecycleStatus @default(DRAFT)
+  postingStatus    PostingLifecycleStatus  @default(NOT_APPLICABLE)
+  requestedById    Int?
+  requestedAt      DateTime                @default(now())
+  startedAt        DateTime?
+  completedAt      DateTime?
+  failedAt         DateTime?
+  fileName         String?
+  fileUrl          String?
+  errorMessage     String?
+  attachmentsCount Int                     @default(0)
+  createdById      Int?
+  updatedById      Int?
+  createdAt        DateTime                @default(now())
+  updatedAt        DateTime                @updatedAt
+
+  audits PrintAudit[]
+
+  @@index([branchId, requestedAt])
+  @@index([status, outputFormat])
+  @@index([templateId])
+}
+
+model ExportJob {
+  id               Int                     @id @default(autoincrement())
+  number           String                  @unique
+  branchId         Int?
+  branch           Branch?                 @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  sourceType       String
+  sourceFilter     Json                    @default("{}")
+  outputFormat     String                  @default("XLSX")
+  status           String                  @default("QUEUED")
+  approvalStatus   ApprovalLifecycleStatus @default(DRAFT)
+  postingStatus    PostingLifecycleStatus  @default(NOT_APPLICABLE)
+  requestedById    Int?
+  requestedAt      DateTime                @default(now())
+  completedAt      DateTime?
+  failedAt         DateTime?
+  rowsExported     Int                     @default(0)
+  fileName         String?
+  fileUrl          String?
+  errorMessage     String?
+  attachmentsCount Int                     @default(0)
+  createdById      Int?
+  updatedById      Int?
+  createdAt        DateTime                @default(now())
+  updatedAt        DateTime                @updatedAt
+
+  audits PrintAudit[]
+
+  @@index([branchId, requestedAt])
+  @@index([status, outputFormat])
+}
+
+model ConversionJob {
+  id               Int                     @id @default(autoincrement())
+  number           String                  @unique
+  branchId         Int?
+  branch           Branch?                 @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  sourceFileName   String
+  sourceFileUrl    String?
+  sourceFormat     String
+  targetFormat     String
+  status           String                  @default("QUEUED")
+  approvalStatus   ApprovalLifecycleStatus @default(DRAFT)
+  postingStatus    PostingLifecycleStatus  @default(NOT_APPLICABLE)
+  requestedById    Int?
+  requestedAt      DateTime                @default(now())
+  completedAt      DateTime?
+  failedAt         DateTime?
+  outputFileName   String?
+  outputFileUrl    String?
+  errorMessage     String?
+  attachmentsCount Int                     @default(0)
+  createdById      Int?
+  updatedById      Int?
+  createdAt        DateTime                @default(now())
+  updatedAt        DateTime                @updatedAt
+
+  audits PrintAudit[]
+
+  @@index([branchId, requestedAt])
+  @@index([status, sourceFormat, targetFormat])
+}
+
+model PrintAudit {
+  id              Int      @id @default(autoincrement())
+  branchId        Int?
+  branch          Branch?  @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  action          String
+  resourceType    String
+  resourceId      String
+  format          String?
+  status          String
+  note            String?
+  metadata        Json     @default("{}")
+  actorId         Int?
+  printJobId      Int?
+  printJob        PrintJob? @relation(fields: [printJobId], references: [id], onDelete: SetNull)
+  exportJobId     Int?
+  exportJob       ExportJob? @relation(fields: [exportJobId], references: [id], onDelete: SetNull)
+  conversionJobId Int?
+  conversionJob   ConversionJob? @relation(fields: [conversionJobId], references: [id], onDelete: SetNull)
+  createdAt       DateTime @default(now())
+
+  @@index([branchId, createdAt])
+  @@index([resourceType, resourceId])
+  @@index([action, status])
+}
+
+model QualityStandard {
+  id               Int                     @id @default(autoincrement())
+  code             String                  @unique
+  branchId         Int?
+  projectId        Int?
+  title            String
+  category         String                  @default("GENERAL")
+  checklist        Json                    @default("{}")
+  status           String                  @default("ACTIVE")
+  approvalStatus   ApprovalLifecycleStatus @default(DRAFT)
+  postingStatus    PostingLifecycleStatus  @default(NOT_APPLICABLE)
+  attachmentsCount Int                     @default(0)
+  notes            String?
+  createdById      Int?
+  updatedById      Int?
+  createdAt        DateTime                @default(now())
+  updatedAt        DateTime                @updatedAt
+
+  inspections Inspection[]
+
+  @@index([branchId, status])
+  @@index([projectId, status])
+}
+
+model Inspection {
+  id                  Int                     @id @default(autoincrement())
+  number              String                  @unique
+  branchId            Int?
+  projectId           Int?
+  standardId          Int?
+  standard            QualityStandard?        @relation(fields: [standardId], references: [id], onDelete: SetNull)
+  inspectionDate      DateTime                @default(now())
+  inspectorEmployeeId Int?
+  title               String
+  location            String?
+  result              String                  @default("PENDING")
+  severity            String                  @default("MEDIUM")
+  status              String                  @default("DRAFT")
+  approvalStatus      ApprovalLifecycleStatus @default(DRAFT)
+  postingStatus       PostingLifecycleStatus  @default(NOT_APPLICABLE)
+  attachmentsCount    Int                     @default(0)
+  notes               String?
+  submittedAt         DateTime?
+  approvedAt          DateTime?
+  createdById         Int?
+  updatedById         Int?
+  createdAt           DateTime                @default(now())
+  updatedAt           DateTime                @updatedAt
+
+  ncrReports NcrReport[]
+
+  @@index([branchId, status, approvalStatus])
+  @@index([projectId, inspectionDate])
+  @@index([standardId])
+}
+
+model NcrReport {
+  id               Int                     @id @default(autoincrement())
+  number           String                  @unique
+  branchId         Int?
+  projectId        Int?
+  inspectionId     Int?
+  inspection       Inspection?             @relation(fields: [inspectionId], references: [id], onDelete: SetNull)
+  reportDate       DateTime                @default(now())
+  severity         String                  @default("MEDIUM")
+  title            String
+  description      String?
+  correctiveAction String?
+  status           String                  @default("OPEN")
+  approvalStatus   ApprovalLifecycleStatus @default(DRAFT)
+  postingStatus    PostingLifecycleStatus  @default(NOT_APPLICABLE)
+  attachmentsCount Int                     @default(0)
+  closedAt         DateTime?
+  closedById       Int?
+  createdById      Int?
+  updatedById      Int?
+  createdAt        DateTime                @default(now())
+  updatedAt        DateTime                @updatedAt
+
+  @@index([branchId, status, severity])
+  @@index([projectId, reportDate])
+  @@index([inspectionId])
+}
+
+model PermitToWork {
+  id                  Int                     @id @default(autoincrement())
+  number              String                  @unique
+  branchId            Int?
+  projectId           Int?
+  permitType          String                  @default("GENERAL")
+  title               String
+  validFrom           DateTime
+  validTo             DateTime
+  issuerEmployeeId    Int?
+  approverEmployeeId  Int?
+  status              String                  @default("DRAFT")
+  approvalStatus      ApprovalLifecycleStatus @default(DRAFT)
+  postingStatus       PostingLifecycleStatus  @default(NOT_APPLICABLE)
+  attachmentsCount    Int                     @default(0)
+  notes               String?
+  approvedAt          DateTime?
+  createdById         Int?
+  updatedById         Int?
+  createdAt           DateTime                @default(now())
+  updatedAt           DateTime                @updatedAt
+
+  incidents SafetyIncident[]
+
+  @@index([branchId, status, approvalStatus])
+  @@index([projectId, validTo])
+}
+
+model SafetyIncident {
+  id               Int                     @id @default(autoincrement())
+  number           String                  @unique
+  branchId         Int?
+  projectId        Int?
+  permitId         Int?
+  permit           PermitToWork?           @relation(fields: [permitId], references: [id], onDelete: SetNull)
+  incidentDate     DateTime                @default(now())
+  severity         String                  @default("HIGH")
+  title            String
+  description      String?
+  rootCause        String?
+  status           String                  @default("OPEN")
+  approvalStatus   ApprovalLifecycleStatus @default(DRAFT)
+  postingStatus    PostingLifecycleStatus  @default(NOT_APPLICABLE)
+  attachmentsCount Int                     @default(0)
+  resolvedAt       DateTime?
+  resolvedById     Int?
+  createdById      Int?
+  updatedById      Int?
+  createdAt        DateTime                @default(now())
+  updatedAt        DateTime                @updatedAt
+
+  @@index([branchId, status, severity])
+  @@index([projectId, incidentDate])
+  @@index([permitId])
+}
+
+model MaintenancePlan {
+  id               Int                     @id @default(autoincrement())
+  code             String                  @unique
+  branchId         Int?
+  assetId          Int?
+  projectId        Int?
+  title            String
+  frequencyType    String                  @default("TIME")
+  intervalValue    Int                     @default(1)
+  nextDueDate      DateTime?
+  nextDueHours     Decimal?
+  status           String                  @default("ACTIVE")
+  approvalStatus   ApprovalLifecycleStatus @default(DRAFT)
+  postingStatus    PostingLifecycleStatus  @default(NOT_APPLICABLE)
+  attachmentsCount Int                     @default(0)
+  notes            String?
+  createdById      Int?
+  updatedById      Int?
+  createdAt        DateTime                @default(now())
+  updatedAt        DateTime                @updatedAt
+
+  orders MaintenanceOrder[]
+
+  @@index([branchId, status])
+  @@index([assetId, status])
+  @@index([projectId, status])
+}
+
+model MaintenanceOrder {
+  id               Int                     @id @default(autoincrement())
+  number           String                  @unique
+  branchId         Int?
+  planId           Int?
+  plan             MaintenancePlan?        @relation(fields: [planId], references: [id], onDelete: SetNull)
+  assetId          Int?
+  projectId        Int?
+  title            String
+  description      String?
+  priority         String                  @default("MEDIUM")
+  scheduledDate    DateTime?
+  dueDate          DateTime?
+  estimatedCost    Decimal                 @default(0)
+  actualCost       Decimal                 @default(0)
+  status           String                  @default("DRAFT")
+  approvalStatus   ApprovalLifecycleStatus @default(DRAFT)
+  postingStatus    PostingLifecycleStatus  @default(NOT_APPLICABLE)
+  attachmentsCount Int                     @default(0)
+  submittedAt      DateTime?
+  approvedAt       DateTime?
+  completedAt      DateTime?
+  createdById      Int?
+  updatedById      Int?
+  createdAt        DateTime                @default(now())
+  updatedAt        DateTime                @updatedAt
+
+  executions        MaintenanceExecution[]
+  spareReservations SpareReservation[]
+  failureAnalyses   FailureAnalysis[]
+
+  @@index([branchId, status, approvalStatus])
+  @@index([assetId, dueDate])
+  @@index([projectId, dueDate])
+  @@index([planId])
+}
+
+model MaintenanceExecution {
+  id                 Int                     @id @default(autoincrement())
+  branchId           Int?
+  orderId            Int
+  order              MaintenanceOrder        @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  assetId            Int?
+  projectId          Int?
+  executionDate      DateTime                @default(now())
+  technicianEmployeeId Int?
+  hoursWorked        Decimal                 @default(0)
+  laborCost          Decimal                 @default(0)
+  spareItemId        Int?
+  warehouseId        Int?
+  spareQuantity      Decimal                 @default(0)
+  spareCost          Decimal                 @default(0)
+  status             String                  @default("LOGGED")
+  approvalStatus     ApprovalLifecycleStatus @default(DRAFT)
+  postingStatus      PostingLifecycleStatus  @default(NOT_APPLICABLE)
+  attachmentsCount   Int                     @default(0)
+  notes              String?
+  createdById        Int?
+  updatedById        Int?
+  createdAt          DateTime                @default(now())
+  updatedAt          DateTime                @updatedAt
+
+  @@index([branchId, executionDate])
+  @@index([orderId, executionDate])
+  @@index([assetId, executionDate])
+}
+
+model SpareReservation {
+  id               Int                     @id @default(autoincrement())
+  branchId         Int?
+  orderId          Int?
+  order            MaintenanceOrder?       @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  assetId          Int?
+  itemId           Int
+  warehouseId      Int?
+  quantity         Decimal                 @default(0)
+  unitCost         Decimal                 @default(0)
+  totalCost        Decimal                 @default(0)
+  status           String                  @default("RESERVED")
+  approvalStatus   ApprovalLifecycleStatus @default(DRAFT)
+  postingStatus    PostingLifecycleStatus  @default(NOT_APPLICABLE)
+  attachmentsCount Int                     @default(0)
+  createdById      Int?
+  updatedById      Int?
+  createdAt        DateTime                @default(now())
+  updatedAt        DateTime                @updatedAt
+
+  @@index([branchId, status])
+  @@index([orderId])
+  @@index([itemId, warehouseId])
+}
+
+model FailureAnalysis {
+  id               Int                     @id @default(autoincrement())
+  number           String                  @unique
+  branchId         Int?
+  orderId          Int?
+  order            MaintenanceOrder?       @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  assetId          Int?
+  projectId        Int?
+  incidentDate     DateTime                @default(now())
+  title            String
+  failureMode      String
+  rootCause        String?
+  mtbfHours        Decimal?
+  severity         String                  @default("MEDIUM")
+  repeatCount      Int                     @default(0)
+  status           String                  @default("OPEN")
+  approvalStatus   ApprovalLifecycleStatus @default(DRAFT)
+  postingStatus    PostingLifecycleStatus  @default(NOT_APPLICABLE)
+  attachmentsCount Int                     @default(0)
+  createdById      Int?
+  updatedById      Int?
+  createdAt        DateTime                @default(now())
+  updatedAt        DateTime                @updatedAt
+
+  @@index([branchId, status, severity])
+  @@index([assetId, incidentDate])
+  @@index([orderId])
+}
+
+model RiskRegister {
+  id               Int                     @id @default(autoincrement())
+  code             String                  @unique
+  branchId         Int?
+  projectId        Int?
+  contractId       Int?
+  departmentId     Int?
+  category         String                  @default("GENERAL")
+  title            String
+  description      String?
+  ownerEmployeeId  Int?
+  probability      Decimal                 @default(0)
+  impact           Decimal                 @default(0)
+  exposure         Decimal                 @default(0)
+  severity         String                  @default("LOW")
+  dueDate          DateTime?
+  status           String                  @default("OPEN")
+  approvalStatus   ApprovalLifecycleStatus @default(DRAFT)
+  postingStatus    PostingLifecycleStatus  @default(NOT_APPLICABLE)
+  attachmentsCount Int                     @default(0)
+  createdById      Int?
+  updatedById      Int?
+  createdAt        DateTime                @default(now())
+  updatedAt        DateTime                @updatedAt
+
+  assessments RiskAssessment[]
+  mitigations MitigationPlan[]
+  followups   RiskFollowup[]
+
+  @@index([branchId, status, severity])
+  @@index([projectId, status])
+  @@index([contractId, status])
+}
+
+model RiskAssessment {
+  id               Int      @id @default(autoincrement())
+  riskId           Int
+  risk             RiskRegister @relation(fields: [riskId], references: [id], onDelete: Cascade)
+  assessmentDate   DateTime @default(now())
+  probability      Decimal  @default(0)
+  impact           Decimal  @default(0)
+  exposure         Decimal  @default(0)
+  severity         String   @default("LOW")
+  notes            String?
+  createdById      Int?
+  updatedById      Int?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([riskId, assessmentDate])
+}
+
+model MitigationPlan {
+  id               Int                     @id @default(autoincrement())
+  riskId           Int
+  risk             RiskRegister            @relation(fields: [riskId], references: [id], onDelete: Cascade)
+  title            String
+  description      String?
+  ownerEmployeeId  Int?
+  dueDate          DateTime?
+  completedAt      DateTime?
+  status           String                  @default("OPEN")
+  approvalStatus   ApprovalLifecycleStatus @default(DRAFT)
+  postingStatus    PostingLifecycleStatus  @default(NOT_APPLICABLE)
+  attachmentsCount Int                     @default(0)
+  createdById      Int?
+  updatedById      Int?
+  createdAt        DateTime                @default(now())
+  updatedAt        DateTime                @updatedAt
+
+  @@index([riskId, status])
+  @@index([dueDate, status])
+}
+
+model RiskFollowup {
+  id               Int      @id @default(autoincrement())
+  riskId           Int
+  risk             RiskRegister @relation(fields: [riskId], references: [id], onDelete: Cascade)
+  followupDate     DateTime @default(now())
+  status           String   @default("OPEN")
+  note             String?
+  nextAction       String?
+  nextReviewDate   DateTime?
+  createdById      Int?
+  updatedById      Int?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([riskId, followupDate])
+  @@index([nextReviewDate, status])
+}
+
+model SchedulePlan {
+  id               Int                     @id @default(autoincrement())
+  code             String                  @unique
+  branchId         Int?
+  projectId        Int?
+  title            String
+  baselineStart    DateTime?
+  baselineEnd      DateTime?
+  actualStart      DateTime?
+  actualEnd        DateTime?
+  status           String                  @default("DRAFT")
+  approvalStatus   ApprovalLifecycleStatus @default(DRAFT)
+  postingStatus    PostingLifecycleStatus  @default(NOT_APPLICABLE)
+  attachmentsCount Int                     @default(0)
+  notes            String?
+  createdById      Int?
+  updatedById      Int?
+  createdAt        DateTime                @default(now())
+  updatedAt        DateTime                @updatedAt
+
+  tasks        ScheduleTask[]
+  dependencies TaskDependency[]
+  snapshots    CriticalPathSnapshot[]
+  assignments  ResourceAssignment[]
+
+  @@index([branchId, status])
+  @@index([projectId, status])
+}
+
+model ScheduleTask {
+  id               Int                     @id @default(autoincrement())
+  planId           Int
+  plan             SchedulePlan            @relation(fields: [planId], references: [id], onDelete: Cascade)
+  branchId         Int?
+  projectId        Int?
+  title            String
+  wbsCode          String?
+  startDate        DateTime
+  endDate          DateTime
+  actualStart      DateTime?
+  actualEnd        DateTime?
+  progressPercent  Decimal                 @default(0)
+  durationDays     Int                     @default(0)
+  isCritical       Boolean                 @default(false)
+  status           String                  @default("OPEN")
+  approvalStatus   ApprovalLifecycleStatus @default(DRAFT)
+  postingStatus    PostingLifecycleStatus  @default(NOT_APPLICABLE)
+  attachmentsCount Int                     @default(0)
+  createdById      Int?
+  updatedById      Int?
+  createdAt        DateTime                @default(now())
+  updatedAt        DateTime                @updatedAt
+
+  predecessorDependencies TaskDependency[]   @relation("TaskPredecessor")
+  successorDependencies   TaskDependency[]   @relation("TaskSuccessor")
+  assignments             ResourceAssignment[]
+
+  @@index([planId, startDate])
+  @@index([projectId, endDate])
+}
+
+model TaskDependency {
+  id                Int          @id @default(autoincrement())
+  planId            Int
+  plan              SchedulePlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+  predecessorTaskId Int
+  predecessorTask   ScheduleTask @relation("TaskPredecessor", fields: [predecessorTaskId], references: [id], onDelete: Cascade)
+  successorTaskId   Int
+  successorTask     ScheduleTask @relation("TaskSuccessor", fields: [successorTaskId], references: [id], onDelete: Cascade)
+  dependencyType    String       @default("FS")
+  lagDays           Int          @default(0)
+  createdAt         DateTime     @default(now())
+
+  @@unique([planId, predecessorTaskId, successorTaskId, dependencyType])
+  @@index([planId])
+}
+
+model CriticalPathSnapshot {
+  id                Int          @id @default(autoincrement())
+  planId            Int
+  plan              SchedulePlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+  snapshotDate      DateTime     @default(now())
+  title             String
+  criticalTasksCount Int         @default(0)
+  delayedTasksCount Int          @default(0)
+  totalTasksCount   Int          @default(0)
+  summary           Json         @default("{}")
+  status            String       @default("SNAPSHOT")
+  createdById       Int?
+  updatedById       Int?
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+
+  @@index([planId, snapshotDate])
+}
+
+model ResourceAssignment {
+  id               Int                     @id @default(autoincrement())
+  planId           Int
+  plan             SchedulePlan            @relation(fields: [planId], references: [id], onDelete: Cascade)
+  taskId           Int?
+  task             ScheduleTask?           @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  resourceType     String
+  resourceRefId    Int
+  quantity         Decimal                 @default(1)
+  allocationPercent Decimal                @default(100)
+  status           String                  @default("ALLOCATED")
+  approvalStatus   ApprovalLifecycleStatus @default(DRAFT)
+  postingStatus    PostingLifecycleStatus  @default(NOT_APPLICABLE)
+  attachmentsCount Int                     @default(0)
+  createdById      Int?
+  updatedById      Int?
+  createdAt        DateTime                @default(now())
+  updatedAt        DateTime                @updatedAt
+
+  @@index([planId, resourceType])
+  @@index([taskId])
+}
+
+model Attendance {
+  id          Int      @id @default(autoincrement())
+  employeeId  Int
+  employee    Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  branchId    Int?
+  branch      Branch?  @relation(fields: [branchId], references: [id])
+  date        DateTime
+  checkIn     DateTime?
+  checkOut    DateTime?
+  hoursWorked Decimal  @default(0)
+  status      String   @default("PRESENT")
+  notes       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([employeeId, date])
+  @@index([branchId, date])
+}
+
+model Timesheet {
+  id               Int            @id @default(autoincrement())
+  employeeId       Int
+  employee         Employee       @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  projectId        Int
+  project          Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  branchId         Int?
+  branch           Branch?        @relation(fields: [branchId], references: [id])
+  projectExpenseId Int?
+  projectExpense   ProjectExpense? @relation(fields: [projectExpenseId], references: [id])
+  date             DateTime
+  hours            Decimal        @default(0)
+  hourlyCost       Decimal        @default(0)
+  amount           Decimal        @default(0)
+  description      String?
+  status           String         @default("DRAFT")
+  approvedBy       Int?
+  approvedAt       DateTime?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  @@index([branchId, date])
+  @@index([employeeId, date])
+  @@index([projectId, date])
+}
+
+model UserBranchAccess {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  branchId  Int
+  branch    Branch   @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  canRead   Boolean  @default(true)
+  canWrite  Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@unique([userId, branchId])
+  @@index([branchId])
 }
 
 model Notification {

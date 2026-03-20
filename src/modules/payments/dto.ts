@@ -1,6 +1,7 @@
-﻿import { z } from 'zod';
+import { z } from 'zod';
+import { branchScopedWriteSchema } from '../../contracts/domain-base';
 
-export const createPaymentSchema = z.object({
+export const createPaymentSchema = branchScopedWriteSchema.extend({
   type: z.enum(['RECEIPT', 'PAYMENT']),
   method: z.enum(['CASH', 'BANK_TRANSFER', 'CHECK', 'CARD']),
   amount: z.number().positive(),
