@@ -4,9 +4,12 @@ import { authenticate } from '../../middleware/auth';
 import { requirePermissions } from '../../middleware/rbac';
 import { PERMISSIONS } from '../../constants/permissions';
 import { ok } from '../../utils/response';
+import { buildSalesForecastFromInvoices } from './sales-forecast.service';
+import { buildSystemDashboardRouter } from '../system-dashboards/route';
 
 const router = Router();
 router.use(authenticate, requirePermissions(PERMISSIONS.ANALYTICS_READ));
+router.use('/dashboard', buildSystemDashboardRouter('analytics'));
 
 router.get('/abc', async (_req: Request, res: Response) => {
   const items: Array<{ id: number; code: string; nameAr: string; inventoryValue: unknown }> = await (prisma as any).item.findMany({
@@ -38,25 +41,19 @@ router.get('/clv', async (_req: Request, res: Response) => {
   ok(res, rows);
 });
 
-router.get('/sales-forecast', async (_req: Request, res: Response) => {
+router.get('/sales-forecast', async (req: Request, res: Response) => {
+  const branchId = Number(req.query.branchId ?? 0);
   const invoices = await prisma.invoice.findMany({
-    where: { type: 'SALES', status: { in: ['ISSUED', 'PAID', 'PARTIAL'] } },
+    where: {
+      type: 'SALES',
+      status: { in: ['ISSUED', 'PAID', 'PARTIAL'] },
+      ...(branchId > 0 ? { branchId } : {})
+    },
+    select: { date: true, total: true },
     orderBy: { date: 'asc' }
   });
-  const monthly = new Map<string, number>();
-  for (const inv of invoices) {
-    const d = new Date(inv.date);
-    const key = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
-    const current = monthly.get(key) ?? 0;
-    monthly.set(key, current + Number(inv.total));
-  }
-  const rows = Array.from(monthly.entries()).map(([period, amount]) => ({ period, amount }));
-  const avg = rows.length ? rows.reduce((s, r) => s + r.amount, 0) / rows.length : 0;
-  ok(res, {
-    history: rows,
-    forecastNextMonth: avg,
-    model: 'moving-average'
-  });
+
+  ok(res, buildSalesForecastFromInvoices(invoices));
 });
 
 router.get('/bsc', async (_req: Request, res: Response) => {

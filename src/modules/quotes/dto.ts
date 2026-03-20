@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { branchScopedWriteSchema } from '../../contracts/domain-base';
 
 const QuoteLineDto = z.object({
   description: z.string().min(1, 'الوصف مطلوب'),
@@ -8,14 +9,14 @@ const QuoteLineDto = z.object({
   taxRate: z.number().min(0, 'معدل الضريبة يجب أن يكون موجب أو صفر').max(100, 'معدل الضريبة لا يمكن أن يتجاوز 100%').optional().default(15)
 });
 
-export const CreateQuoteDto = z.object({
+export const CreateQuoteDto = branchScopedWriteSchema.extend({
   customerId: z.number().int().positive('معرف العميل مطلوب'),
   validUntil: z.string().optional(),
   lines: z.array(QuoteLineDto).min(1, 'يجب إضافة بند واحد على الأقل'),
   notes: z.string().optional()
 });
 
-export const UpdateQuoteDto = z.object({
+export const UpdateQuoteDto = branchScopedWriteSchema.extend({
   validUntil: z.string().optional(),
   lines: z.array(QuoteLineDto).optional(),
   notes: z.string().optional()

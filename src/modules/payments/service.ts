@@ -1,4 +1,5 @@
-﻿import { prisma } from '../../config/database';
+import { prisma } from '../../config/database';
+import { enqueueOutboxEvent } from '../../platform/events/outbox';
 import { parseDateOrThrow } from '../../utils/date';
 import { buildSequentialNumber, buildSequentialNumberFromLatest } from '../../utils/id-generator';
 import { Errors } from '../../utils/response';
@@ -154,6 +155,7 @@ export async function createPayment(data: any, userId: number) {
         type: data.type,
         method: data.method,
         amount: data.amount,
+        branchId: data.branchId,
         customerId: data.customerId,
         supplierId: data.supplierId,
         bankId: data.bankId,
@@ -163,6 +165,8 @@ export async function createPayment(data: any, userId: number) {
         description: data.description,
         notes: data.notes,
         status: 'PENDING',
+        approvalStatus: 'PENDING',
+        postingStatus: 'UNPOSTED',
         createdById: userId
       }
     });
@@ -176,6 +180,24 @@ export async function createPayment(data: any, userId: number) {
         }))
       });
     }
+
+    await enqueueOutboxEvent(tx, {
+      eventType: 'finance.payment.created',
+      aggregateType: 'Payment',
+      aggregateId: String(payment.id),
+      actorId: userId,
+      branchId: payment.branchId,
+      correlationId: `payment:${payment.id}:created`,
+      payload: {
+        paymentId: payment.id,
+        number: payment.number,
+        type: payment.type,
+        amount: payment.amount,
+        status: payment.status,
+        customerId: payment.customerId,
+        supplierId: payment.supplierId
+      }
+    });
 
     return tx.payment.findUnique({
       where: { id: payment.id },
@@ -205,11 +227,35 @@ export async function completePayment(id: number, userId: number, allocations: A
     await applyAllocations(tx, payment.id, normalizedAllocations);
     const entry = await createJournalForPayment(tx, payment, userId);
 
-    return tx.payment.update({
+    const completed = await tx.payment.update({
       where: { id },
-      data: { status: 'COMPLETED', journalEntryId: entry.id },
+      data: {
+        status: 'COMPLETED',
+        approvalStatus: 'APPROVED',
+        postingStatus: 'POSTED',
+        journalEntryId: entry.id
+      },
       include: { allocations: true }
     });
+
+    await enqueueOutboxEvent(tx, {
+      eventType: 'finance.payment.completed',
+      aggregateType: 'Payment',
+      aggregateId: String(completed.id),
+      actorId: userId,
+      branchId: completed.branchId,
+      correlationId: `payment:${completed.id}:completed`,
+      payload: {
+        paymentId: completed.id,
+        number: completed.number,
+        type: completed.type,
+        amount: completed.amount,
+        journalEntryId: entry.id,
+        status: completed.status
+      }
+    });
+
+    return completed;
   }, { maxWait: 10000, timeout: 60000 });
 }
 
@@ -247,6 +293,7 @@ export async function updatePayment(id: number, data: any) {
       data: {
         ...data,
         allocations: undefined,
+        branchId: data.branchId ?? current.branchId,
         date: data.date ? parseDateOrThrow(data.date) : current.date,
         checkDate: data.checkDate ? parseDateOrThrow(data.checkDate, 'checkDate') : current.checkDate
       }
@@ -288,6 +335,7 @@ export async function listPayments(query: any) {
   const where: any = {};
   if (query.type) where.type = query.type;
   if (query.status) where.status = query.status;
+  if (query.branchId) where.branchId = Number(query.branchId);
 
   const [rows, total] = await Promise.all([
     prisma.payment.findMany({

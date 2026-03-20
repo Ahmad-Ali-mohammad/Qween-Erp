@@ -63,5 +63,9 @@
   REPORTS_ADVANCED_WRITE: 'reports.advanced.write',
   ANALYTICS_READ: 'analytics.read',
   SECURITY_READ: 'security.read',
-  SECURITY_WRITE: 'security.write'
+  SECURITY_WRITE: 'security.write',
+  PLATFORM_READ: 'platform.read',
+  PLATFORM_WRITE: 'platform.write',
+  DOCUMENTS_READ: 'documents.read',
+  DOCUMENTS_WRITE: 'documents.write'
 } as const;

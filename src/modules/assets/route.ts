@@ -9,6 +9,7 @@ import { audit } from '../../middleware/audit';
 import { ok, Errors } from '../../utils/response';
 import { runDepreciation } from '../depreciation/service';
 import { disposeAsset } from './disposal-service';
+import { buildSystemDashboardRouter } from '../system-dashboards/route';
 
 const categorySchema = z.object({
   code: z.string().min(1),
@@ -53,6 +54,7 @@ const disposeSchema = z.object({
 
 const router = Router();
 router.use(authenticate);
+router.use('/dashboard', buildSystemDashboardRouter('assets'));
 
 router.get('/categories', requirePermissions(PERMISSIONS.ASSETS_READ), async (_req, res) => {
   const rows = await prisma.assetCategory.findMany({ orderBy: { id: 'desc' } });

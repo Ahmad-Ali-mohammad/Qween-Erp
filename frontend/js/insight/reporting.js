@@ -557,17 +557,42 @@ async function renderSalesForecast() {
   const load = async () => {
     const data = (await request('/analytics/sales-forecast')).data || {};
     const history = asArray(data.history);
+    const diagnostics = data.diagnostics || {};
+    const forecastRange = data.forecastRange || {};
+    const trendLabel =
+      diagnostics.trendDirection === 'up'
+        ? 'صاعد'
+        : diagnostics.trendDirection === 'down'
+          ? 'هابط'
+          : 'مستقر';
 
     view.innerHTML = `
       <div class="kpi-grid">
-        <div class="kpi"><div>نموذج التنبؤ</div><div class="val">${data.model || '-'}</div></div>
+        <div class="kpi"><div>نموذج التنبؤ</div><div class="val">${data.modelLabel || data.model || '-'}</div></div>
         <div class="kpi"><div>القيمة المتوقعة للشهر القادم</div><div class="val">${formatMoney(data.forecastNextMonth)}</div></div>
-        <div class="kpi"><div>عدد الأشهر التاريخية</div><div class="val">${history.length}</div></div>
+        <div class="kpi"><div>الفترة المستهدفة</div><div class="val">${data.nextPeriod || '-'}</div></div>
+        <div class="kpi"><div>درجة الثقة</div><div class="val">${asNumber(data.confidenceScore).toFixed(0)}%</div></div>
+      </div>
+      <div class="card">
+        <div class="grid-3">
+          <div class="kpi"><div>نطاق التوقع</div><div class="val">${formatMoney(forecastRange.low)} - ${formatMoney(forecastRange.high)}</div></div>
+          <div class="kpi"><div>عدد الأشهر التاريخية</div><div class="val">${asNumber(diagnostics.historyMonths || history.length)}</div></div>
+          <div class="kpi"><div>الاتجاه العام</div><div class="val">${trendLabel}</div></div>
+          <div class="kpi"><div>الأشهر المستخدمة للتدريب</div><div class="val">${asNumber(diagnostics.trainingMonths)}</div></div>
+          <div class="kpi"><div>أشهر التحقق</div><div class="val">${asNumber(diagnostics.validationMonths)}</div></div>
+          <div class="kpi"><div>متوسط المبيعات الشهرية</div><div class="val">${formatMoney(diagnostics.averageMonthlySales)}</div></div>
+        </div>
+        <p class="muted" style="margin-top:12px;">${data.insightAr || 'يعرض هذا التقرير تنبؤ الشهر القادم اعتماداً على سجل فواتير المبيعات داخل النظام.'}</p>
       </div>
       <div class="card">
         ${table(
-          ['الفترة', 'المبيعات الفعلية'],
-          history.map((r) => [r.period || '-', formatMoney(r.amount)])
+          ['الفترة', 'المبيعات الفعلية', 'تقدير النموذج', 'الانحراف'],
+          history.map((r) => [
+            r.period || '-',
+            formatMoney(r.amount),
+            formatMoney(r.fittedAmount),
+            `${formatMoney(r.deviation)} (${asNumber(r.deviationPct).toFixed(1)}%)`
+          ])
         )}
       </div>
     `;

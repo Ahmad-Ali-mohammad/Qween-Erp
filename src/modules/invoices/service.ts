@@ -1,4 +1,5 @@
 import { prisma } from '../../config/database';
+import { enqueueOutboxEvent } from '../../platform/events/outbox';
 import { parseDateOrThrow } from '../../utils/date';
 import { Errors } from '../../utils/response';
 import { buildSequentialNumberFromLatest } from '../../utils/id-generator';
@@ -147,65 +148,118 @@ async function createJournalForInvoice(tx: any, invoice: any, userId: number) {
   return entry;
 }
 
-export async function createInvoice(data: any, userId: number) {
+export async function createInvoiceInTransaction(
+  tx: any,
+  data: any,
+  userId: number,
+  options: { issue?: boolean; number?: string } = {}
+) {
   if (data.type === 'SALES' && !data.customerId) throw Errors.validation('يجب تحديد العميل لفاتورة المبيعات');
   if (data.type === 'PURCHASE' && !data.supplierId) throw Errors.validation('يجب تحديد المورد لفاتورة المشتريات');
 
   const invoiceDate = parseDateOrThrow(data.date);
   const calc = calcLines(data.lines);
 
-  return prisma.$transaction(async (tx) => {
-    const number = await generateNumber(tx, data.type, invoiceDate);
+  const number = options.number ?? (await generateNumber(tx, data.type, invoiceDate));
 
-    const invoice = await tx.invoice.create({
-      data: {
-        number,
-        type: data.type,
-        customerId: data.customerId,
-        supplierId: data.supplierId,
-        date: invoiceDate,
-        dueDate: data.dueDate ? parseDateOrThrow(data.dueDate, 'dueDate') : null,
-        projectId: data.projectId,
-        notes: data.notes,
-        subtotal: calc.subtotal,
-        discount: calc.discount,
-        taxableAmount: calc.taxableAmount,
-        vatAmount: calc.vatAmount,
-        total: calc.total,
-        paidAmount: 0,
-        outstanding: calc.total,
-        status: 'DRAFT',
-        paymentStatus: 'PENDING',
-        createdById: userId
-      }
-    });
-
-    await tx.invoiceLine.createMany({
-      data: calc.mapped.map((line) => ({ ...line, invoiceId: invoice.id }))
-    });
-
-    return invoice;
+  const invoice = await tx.invoice.create({
+    data: {
+      number,
+      type: data.type,
+      branchId: data.branchId,
+      customerId: data.customerId,
+      supplierId: data.supplierId,
+      date: invoiceDate,
+      dueDate: data.dueDate ? parseDateOrThrow(data.dueDate, 'dueDate') : null,
+      projectId: data.projectId,
+      notes: data.notes,
+      subtotal: calc.subtotal,
+      discount: calc.discount,
+      taxableAmount: calc.taxableAmount,
+      vatAmount: calc.vatAmount,
+      total: calc.total,
+      paidAmount: 0,
+      outstanding: calc.total,
+      status: 'DRAFT',
+      paymentStatus: 'PENDING',
+      approvalStatus: 'DRAFT',
+      postingStatus: 'UNPOSTED',
+      createdById: userId
+    }
   });
+
+  await tx.invoiceLine.createMany({
+    data: calc.mapped.map((line) => ({ ...line, invoiceId: invoice.id }))
+  });
+
+  await enqueueOutboxEvent(tx, {
+    eventType: 'finance.invoice.created',
+    aggregateType: 'Invoice',
+    aggregateId: String(invoice.id),
+    actorId: userId,
+    branchId: invoice.branchId,
+    correlationId: `invoice:${invoice.id}:created`,
+    payload: {
+      invoiceId: invoice.id,
+      number: invoice.number,
+      type: invoice.type,
+      customerId: invoice.customerId,
+      supplierId: invoice.supplierId,
+      total: invoice.total,
+      status: invoice.status
+    }
+  });
+
+  if (options.issue) {
+    return issueInvoiceInTransaction(tx, invoice.id, userId);
+  }
+
+  return invoice;
+}
+
+export async function issueInvoiceInTransaction(tx: any, id: number, userId: number) {
+  const invoice = await tx.invoice.findUnique({ where: { id }, include: { lines: true } });
+  if (!invoice) throw Errors.notFound('الفاتورة غير موجودة');
+  if (invoice.status !== 'DRAFT') throw Errors.business('يمكن إصدار الفواتير المسودة فقط');
+
+  const entry = await createJournalForInvoice(tx, invoice, userId);
+
+  const updated = await tx.invoice.update({
+    where: { id },
+    data: {
+      status: 'ISSUED',
+      approvalStatus: 'APPROVED',
+      postingStatus: 'POSTED',
+      journalEntryId: entry.id
+    }
+  });
+
+  await enqueueOutboxEvent(tx, {
+    eventType: 'finance.invoice.issued',
+    aggregateType: 'Invoice',
+    aggregateId: String(updated.id),
+    actorId: userId,
+    branchId: updated.branchId,
+    correlationId: `invoice:${updated.id}:issued`,
+    payload: {
+      invoiceId: updated.id,
+      number: updated.number,
+      type: updated.type,
+      total: updated.total,
+      journalEntryId: entry.id,
+      status: updated.status
+    }
+  });
+
+  return updated;
+}
+
+export async function createInvoice(data: any, userId: number) {
+  return prisma.$transaction((tx) => createInvoiceInTransaction(tx, data, userId));
 }
 
 export async function issueInvoice(id: number, userId: number) {
-  return prisma.$transaction(async (tx) => {
-    const invoice = await tx.invoice.findUnique({ where: { id }, include: { lines: true } });
-    if (!invoice) throw Errors.notFound('الفاتورة غير موجودة');
-    if (invoice.status !== 'DRAFT') throw Errors.business('يمكن إصدار الفواتير المسودة فقط');
-
-    const entry = await createJournalForInvoice(tx, invoice, userId);
-
-    const updated = await tx.invoice.update({
-      where: { id },
-      data: {
-        status: 'ISSUED',
-        journalEntryId: entry.id
-      }
-    });
-
-    return updated;
-  });
+  return prisma.$transaction((tx) => issueInvoiceInTransaction(tx, id, userId));
 }
 
 export async function updateInvoice(id: number, data: any) {
@@ -230,6 +284,7 @@ export async function updateInvoice(id: number, data: any) {
       where: { id },
       data: {
         type: data.type ?? current.type,
+        branchId: data.branchId ?? current.branchId,
         customerId: data.customerId ?? current.customerId,
         supplierId: data.supplierId ?? current.supplierId,
         date: data.date ? parseDateOrThrow(data.date) : current.date,
@@ -285,6 +340,7 @@ export async function listInvoices(query: any) {
   const skip = (page - 1) * limit;
 
   const where: any = {};
+  if (query.branchId) where.branchId = Number(query.branchId);
   if (query.type) where.type = query.type;
   if (query.status) where.status = query.status;
   if (query.customerId) where.customerId = Number(query.customerId);

@@ -1,4 +1,5 @@
-﻿import { z } from 'zod';
+import { z } from 'zod';
+import { branchScopedWriteSchema } from '../../contracts/domain-base';
 
 export const invoiceLineSchema = z.object({
   description: z.string().min(1),
@@ -9,7 +10,7 @@ export const invoiceLineSchema = z.object({
   accountId: z.number().int().optional()
 });
 
-export const createInvoiceSchema = z.object({
+export const createInvoiceSchema = branchScopedWriteSchema.extend({
   type: z.enum(['SALES', 'PURCHASE']),
   customerId: z.number().int().optional(),
   supplierId: z.number().int().optional(),

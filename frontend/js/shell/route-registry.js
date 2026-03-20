@@ -16,14 +16,26 @@ import { renderProfile } from '../admin/profile.js';
 import { renderOperations } from '../flows/operations/index.js';
 import { renderQuickInvoice, renderQuickJournal, renderQuickStatement, renderGlobalSearch } from './quick-actions.js';
 import { renderSection } from '../flows/section-registry.js';
-import { renderDashboard } from '../insight/dashboard.js';
 import { renderInvoices } from '../flows/commercial/invoices.js';
 import { renderPayments } from '../flows/commercial/payments.js';
 import { renderQuotes } from '../flows/commercial/quotes.js';
 import { renderAccountStatement, renderGeneralLedger, renderYearClose } from '../flows/finance/reporting.js';
+import { renderSystemDashboard } from '../systems/dashboard.js';
+import { createSystemsRegistry } from '../systems/registry.js';
+import { renderPrintingWorkspace } from '../systems/printing.js';
+import { renderSiteOpsWorkspace } from '../systems/site-ops.js';
+import { renderSubcontractorsWorkspace } from '../systems/subcontractors.js';
+import { renderTenderingWorkspace } from '../systems/tendering.js';
+import { renderBudgetingWorkspace } from '../systems/budgeting.js';
+import { renderQualityWorkspace } from '../systems/quality.js';
+import { renderMaintenanceWorkspace } from '../systems/maintenance.js';
+import { renderRiskWorkspace } from '../systems/risk.js';
+import { renderSchedulingWorkspace } from '../systems/scheduling.js';
+
+const systemsRegistry = createSystemsRegistry((key) => () => renderSystemDashboard(key));
 
 const protectedRoutes = [
-  ['/dashboard', renderDashboard],
+  ['/dashboard', () => renderSystemDashboard('control-center')],
   ['/accounts', renderAccounts],
   ['/journals', renderJournals],
   ['/fiscal-years', () => renderFiscal('years')],
@@ -56,9 +68,13 @@ const protectedRoutes = [
   ['/quick-invoice', renderQuickInvoice],
   ['/quick-statement', renderQuickStatement],
   ['/global-search', renderGlobalSearch],
+  ['/approvals', () => renderSystemDashboard('control-center')],
+  ['/documents', () => renderSystemDashboard('documents')],
   ['/general-ledger', renderGeneralLedger],
   ['/account-statement', renderAccountStatement],
+  ['/supplier-statements', () => renderParties('suppliers')],
   ['/year-close', renderYearClose],
+  ['/collections', () => renderPayments('RECEIPT')],
   ['/sales-quotes', renderQuotes],
   ['/sales-returns', () => renderSection('/sales-returns')],
   ['/sales-reports', () => renderSection('/sales-reports')],
@@ -72,6 +88,8 @@ const protectedRoutes = [
   ['/stock-counts', () => renderSection('/stock-counts')],
   ['/stock-movements', () => renderSection('/stock-movements')],
   ['/inventory-reports', () => renderSection('/inventory-reports')],
+  ['/inventory-items', () => renderSection('/items')],
+  ['/inventory-movements', () => renderSection('/stock-movements')],
   ['/asset-disposal', () => renderAssets('disposal')],
   ['/asset-reports', () => renderAssets('reports')],
   ['/cashbox', () => renderBanks('cashbox')],
@@ -98,6 +116,7 @@ const protectedRoutes = [
   ['/backups', () => renderSettings('backups')],
   ['/notifications', () => renderSettings('notifications')],
   ['/tasks', () => renderSettings('tasks')],
+  ['/audit-log', renderAuditLogs],
   ['/internal-controls', () => renderSettings('internal-controls')],
   ['/security', () => renderSettings('security')],
   ['/integrations', () => renderSettings('integrations')],
@@ -108,10 +127,14 @@ const protectedRoutes = [
   ['/project-tasks', () => renderOperations('project-tasks')],
   ['/project-expenses', () => renderOperations('project-expenses')],
   ['/employees', () => renderOperations('employees')],
+  ['/timesheets', () => renderOperations('employees')],
   ['/leave-requests', () => renderOperations('leave-requests')],
+  ['/payroll', () => renderOperations('payroll-runs')],
   ['/payroll-runs', () => renderOperations('payroll-runs')],
   ['/contracts', () => renderOperations('contracts')],
   ['/contract-milestones', () => renderOperations('contract-milestones')],
+  ['/goods-receipts', () => renderSection('/purchase-orders')],
+  ['/supplier-payments', () => renderPayments('PAYMENT')],
   ['/knowledge-base', () => renderHelp('knowledge')],
   ['/assistant', () => renderHelp('assistant')],
   ['/support', () => renderHelp('support')],
@@ -119,11 +142,43 @@ const protectedRoutes = [
   ['/profile', () => renderProfile('profile')],
   ['/profile-password', () => renderProfile('password')],
   ['/profile-mfa', () => renderProfile('mfa')],
-  ['/profile-preferences', () => renderProfile('preferences')]
+  ['/profile-preferences', () => renderProfile('preferences')],
+  ['/systems/subcontractors/contracts', () => renderSubcontractorsWorkspace('contracts')],
+  ['/systems/subcontractors/payments', () => renderSubcontractorsWorkspace('payments')],
+  ['/systems/printing/templates', () => renderPrintingWorkspace('templates')],
+  ['/systems/printing/jobs', () => renderPrintingWorkspace('jobs')],
+  ['/systems/printing/archive', () => renderPrintingWorkspace('archive')],
+  ['/systems/budgeting/scenarios', () => renderBudgetingWorkspace('scenarios')],
+  ['/systems/budgeting/variance', () => renderBudgetingWorkspace('variance')],
+  ['/systems/budgeting/forecast', () => renderBudgetingWorkspace('forecast')],
+  ['/systems/quality/inspections', () => renderQualityWorkspace('inspections')],
+  ['/systems/quality/ncr', () => renderQualityWorkspace('ncr')],
+  ['/systems/quality/incidents', () => renderQualityWorkspace('incidents')],
+  ['/systems/maintenance/plans', () => renderMaintenanceWorkspace('plans')],
+  ['/systems/maintenance/orders', () => renderMaintenanceWorkspace('orders')],
+  ['/systems/maintenance/failures', () => renderMaintenanceWorkspace('failures')],
+  ['/systems/risk/register', () => renderRiskWorkspace('register')],
+  ['/systems/risk/heatmap', () => renderRiskWorkspace('heatmap')],
+  ['/systems/risk/followup', () => renderRiskWorkspace('followup')],
+  ['/systems/scheduling/plans', () => renderSchedulingWorkspace('plans')],
+  ['/systems/scheduling/tasks', () => renderSchedulingWorkspace('tasks')],
+  ['/systems/scheduling/critical-path', () => renderSchedulingWorkspace('critical-path')],
+  ['/systems/site-ops/daily', () => renderSiteOpsWorkspace('daily')],
+  ['/systems/site-ops/materials', () => renderSiteOpsWorkspace('materials')],
+  ['/systems/site-ops/attendance', () => renderSiteOpsWorkspace('attendance')],
+  ['/systems/site-ops/issues', () => renderSiteOpsWorkspace('issues')],
+  ['/systems/tendering/tenders', () => renderTenderingWorkspace('tenders')],
+  ['/systems/tendering/analysis', () => renderTenderingWorkspace('analysis')]
 ];
 
 export function registerProtectedRoutes(protect) {
   protectedRoutes.forEach(([path, renderer]) => {
     registerRoute(path, protect(renderer));
+  });
+
+  systemsRegistry.forEach((system) => {
+    if (system.dashboardRenderer) {
+      registerRoute(system.route, protect(system.dashboardRenderer));
+    }
   });
 }
