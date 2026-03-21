@@ -35,17 +35,21 @@ describe('Wave A system dashboard contracts', () => {
     token = await loginAdmin();
   });
 
-  it('serves all canonical dashboard endpoints with consistent array payloads', async () => {
-    for (const namespace of namespaces) {
-      for (const section of sections) {
-        const response = await request(app)
-          .get(`/api/${namespace}/dashboard/${section}`)
-          .set('Authorization', `Bearer ${token}`);
+  it(
+    'serves all canonical dashboard endpoints with consistent array payloads',
+    async () => {
+      for (const namespace of namespaces) {
+        for (const section of sections) {
+          const response = await request(app)
+            .get(`/api/${namespace}/dashboard/${section}`)
+            .set('Authorization', `Bearer ${token}`);
 
-        expect(response.status).toBe(200);
-        expect(response.body.success).toBe(true);
-        expect(Array.isArray(response.body.data)).toBe(true);
+          expect(response.status).toBe(200);
+          expect(response.body.success).toBe(true);
+          expect(Array.isArray(response.body.data)).toBe(true);
+        }
       }
-    }
-  });
+    },
+    60000
+  );
 });

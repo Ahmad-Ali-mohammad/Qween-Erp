@@ -35,9 +35,9 @@ export function createSystemsRegistry(dashboardRendererFactory = null) {
       group: 'core',
       summary: 'الموافقات الموحدة والتنبيهات والأحداث التنفيذية في مكان واحد.',
       quickActions: [
-        { label: 'المهام', path: '/tasks' },
-        { label: 'الإشعارات', path: '/notifications' },
-        { label: 'سجل التدقيق', path: '/audit-logs' }
+        { label: 'الاعتمادات', path: '/systems/control-center/approvals' },
+        { label: 'الإشعارات', path: '/systems/control-center/notifications' },
+        { label: 'المهام', path: '/systems/control-center/tasks' }
       ]
     },
     {
@@ -263,8 +263,8 @@ export function createSystemsRegistry(dashboardRendererFactory = null) {
       summary: 'السجل الموحد للعقود والالتزامات والملاحق والمواعيد المهمة.',
       moneyKeys: ['commitments'],
       quickActions: [
-        { label: 'العقود', path: '/contracts' },
-        { label: 'المراحل', path: '/contract-milestones' }
+        { label: 'العقود', path: '/systems/contracts/registry' },
+        { label: 'المراحل', path: '/systems/contracts/milestones' }
       ]
     },
     {

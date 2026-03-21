@@ -561,7 +561,7 @@ async function buildProjectsBundle(filters: DashboardFilters): Promise<SystemDas
 
   const alerts: DashboardAlertItem[] = [];
   if (overBudgetProjects.length) alerts.push({ key: 'over-budget', title: 'مشاريع تجاوزت الميزانية', message: `يوجد ${overBudgetProjects.length} مشروع تجاوز التكلفة المخططة.`, severity: 'warning', route: '#/projects' });
-  if (pendingMilestones.length) alerts.push({ key: 'milestones', title: 'التزامات تعاقدية مفتوحة', message: `${pendingMilestones.length} milestone/claim بحاجة متابعة.`, severity: 'info', route: '#/contracts' });
+  if (pendingMilestones.length) alerts.push({ key: 'milestones', title: 'التزامات تعاقدية مفتوحة', message: `${pendingMilestones.length} milestone/claim بحاجة متابعة.`, severity: 'info', route: '#/systems/contracts/milestones' });
 
   return {
     summary: [
@@ -570,11 +570,11 @@ async function buildProjectsBundle(filters: DashboardFilters): Promise<SystemDas
       { key: 'actual-cost', label: 'التكلفة الفعلية', value: Math.round(actualCostTotal), route: '#/projects' },
       { key: 'over-budget', label: 'انحرافات الميزانية', value: overBudgetProjects.length, tone: overBudgetProjects.length ? 'warning' : 'positive', route: '#/projects' },
       { key: 'open-tasks', label: 'مهام مفتوحة', value: tasks.filter((row) => row.status !== 'DONE').length, route: '#/projects' },
-      { key: 'linked-contracts', label: 'مشاريع مرتبطة بعقود', value: projects.filter((row) => row.contractId).length, route: '#/contracts' }
+      { key: 'linked-contracts', label: 'مشاريع مرتبطة بعقود', value: projects.filter((row) => row.contractId).length, route: '#/systems/contracts/registry' }
     ],
     queues: [
       { key: 'task-queue', label: 'طابور المهام', count: tasks.filter((row) => row.status !== 'DONE').length, route: '#/projects' },
-      { key: 'milestone-queue', label: 'مستخلصات/مراحل مفتوحة', count: pendingMilestones.length, route: '#/contracts' },
+      { key: 'milestone-queue', label: 'مستخلصات/مراحل مفتوحة', count: pendingMilestones.length, route: '#/systems/contracts/milestones' },
       { key: 'cost-queue', label: 'مصروفات حديثة', count: expenses.length, route: '#/projects' }
     ],
     activity: [
@@ -948,22 +948,22 @@ async function buildContractsBundle(filters: DashboardFilters): Promise<SystemDa
   const milestoneSeries = pendingMilestones.filter((row) => row.dueDate).slice(0, 6).map((row) => ({ label: row.title, value: Math.round(toNumber(row.amount)) }));
 
   const alerts: DashboardAlertItem[] = [];
-  if (renewalsDue.length) alerts.push({ key: 'renewals', title: 'عقود على وشك الانتهاء', message: `${renewalsDue.length} عقد يحتاج قرار تجديد أو إقفال.`, severity: 'warning', route: '#/contracts' });
-  if (expiredContracts.length) alerts.push({ key: 'expired', title: 'عقود منتهية غير مغلقة', message: `${expiredContracts.length} عقد تجاوز تاريخ الانتهاء وما يزال نشطًا.`, severity: 'danger', route: '#/contracts' });
+  if (renewalsDue.length) alerts.push({ key: 'renewals', title: 'عقود على وشك الانتهاء', message: `${renewalsDue.length} عقد يحتاج قرار تجديد أو إقفال.`, severity: 'warning', route: '#/systems/contracts/registry' });
+  if (expiredContracts.length) alerts.push({ key: 'expired', title: 'عقود منتهية غير مغلقة', message: `${expiredContracts.length} عقد تجاوز تاريخ الانتهاء وما يزال نشطًا.`, severity: 'danger', route: '#/systems/contracts/registry' });
 
   return {
     summary: [
-      { key: 'contracts-total', label: 'إجمالي العقود', value: contracts.length, route: '#/contracts' },
-      { key: 'contracts-approved', label: 'عقود معتمدة', value: approvedContracts.length, route: '#/contracts' },
-      { key: 'renewals-due', label: 'تجديدات قريبة', value: renewalsDue.length, tone: renewalsDue.length ? 'warning' : 'positive', route: '#/contracts' },
-      { key: 'open-obligations', label: 'التزامات مالية مفتوحة', value: pendingMilestones.length, route: '#/contracts' },
-      { key: 'commitments', label: 'قيمة الالتزامات', value: Math.round(commitments), route: '#/contracts' },
-      { key: 'attachments', label: 'عقود بمرفقات', value: contracts.filter((row) => row.attachmentsCount > 0).length, route: '#/contracts' }
+      { key: 'contracts-total', label: 'إجمالي العقود', value: contracts.length, route: '#/systems/contracts/registry' },
+      { key: 'contracts-approved', label: 'عقود معتمدة', value: approvedContracts.length, route: '#/systems/contracts/registry' },
+      { key: 'renewals-due', label: 'تجديدات قريبة', value: renewalsDue.length, tone: renewalsDue.length ? 'warning' : 'positive', route: '#/systems/contracts/registry' },
+      { key: 'open-obligations', label: 'التزامات مالية مفتوحة', value: pendingMilestones.length, route: '#/systems/contracts/milestones' },
+      { key: 'commitments', label: 'قيمة الالتزامات', value: Math.round(commitments), route: '#/systems/contracts/registry' },
+      { key: 'attachments', label: 'عقود بمرفقات', value: contracts.filter((row) => row.attachmentsCount > 0).length, route: '#/systems/contracts/registry' }
     ],
     queues: [
-      { key: 'contract-approvals', label: 'اعتمادات العقود', count: contracts.filter((row) => row.approvalStatus === 'PENDING').length, route: '#/contracts' },
-      { key: 'milestones-queue', label: 'التزامات مستحقة', count: pendingMilestones.length, route: '#/contracts' },
-      { key: 'amendments-queue', label: 'عقود مسودة/تعديلات', count: contracts.filter((row) => row.status === 'DRAFT').length, route: '#/contracts' }
+      { key: 'contract-approvals', label: 'اعتمادات العقود', count: contracts.filter((row) => row.approvalStatus === 'PENDING').length, route: '#/systems/contracts/registry' },
+      { key: 'milestones-queue', label: 'التزامات مستحقة', count: pendingMilestones.length, route: '#/systems/contracts/milestones' },
+      { key: 'amendments-queue', label: 'عقود مسودة/تعديلات', count: contracts.filter((row) => row.status === 'DRAFT').length, route: '#/systems/contracts/registry' }
     ],
     activity: [
       ...recentContracts.map((row) => ({
@@ -972,7 +972,7 @@ async function buildContractsBundle(filters: DashboardFilters): Promise<SystemDa
         subtitle: row.number,
         date: row.updatedAt.toISOString(),
         status: row.status,
-        route: '#/contracts'
+        route: '#/systems/contracts/registry'
       })),
       ...pendingMilestones.slice(0, 4).map((row) => ({
         key: `milestone-${row.id}`,
@@ -980,7 +980,7 @@ async function buildContractsBundle(filters: DashboardFilters): Promise<SystemDa
         subtitle: `قيمة ${Math.round(toNumber(row.amount))}`,
         date: row.dueDate?.toISOString(),
         status: row.status,
-        route: '#/contracts'
+        route: '#/systems/contracts/milestones'
       }))
     ]
       .sort((left, right) => String(right.date ?? '').localeCompare(String(left.date ?? '')))

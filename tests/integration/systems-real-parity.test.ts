@@ -53,8 +53,14 @@ describe('Systems real parity', () => {
     expect(realSystemKeys.sort()).toEqual([...expectedSystemKeys].sort());
   });
 
-  it('registers the operational routes for the four remaining systems', () => {
+  it('registers the operational routes for control center and the remaining systems', () => {
     const expectedRoutes = [
+      '/systems/control-center/approvals',
+      '/systems/control-center/notifications',
+      '/systems/control-center/tasks',
+      '/systems/control-center/governance',
+      '/systems/contracts/registry',
+      '/systems/contracts/milestones',
       '/systems/quality/inspections',
       '/systems/quality/ncr',
       '/systems/quality/incidents',

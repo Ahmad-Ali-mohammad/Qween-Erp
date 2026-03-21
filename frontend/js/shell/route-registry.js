@@ -31,6 +31,8 @@ import { renderQualityWorkspace } from '../systems/quality.js';
 import { renderMaintenanceWorkspace } from '../systems/maintenance.js';
 import { renderRiskWorkspace } from '../systems/risk.js';
 import { renderSchedulingWorkspace } from '../systems/scheduling.js';
+import { renderControlCenterWorkspace } from '../systems/control-center.js';
+import { renderContractsWorkspace } from '../systems/contracts.js';
 
 const systemsRegistry = createSystemsRegistry((key) => () => renderSystemDashboard(key));
 
@@ -143,6 +145,12 @@ const protectedRoutes = [
   ['/profile-password', () => renderProfile('password')],
   ['/profile-mfa', () => renderProfile('mfa')],
   ['/profile-preferences', () => renderProfile('preferences')],
+  ['/systems/control-center/approvals', () => renderControlCenterWorkspace('approvals')],
+  ['/systems/control-center/notifications', () => renderControlCenterWorkspace('notifications')],
+  ['/systems/control-center/tasks', () => renderControlCenterWorkspace('tasks')],
+  ['/systems/control-center/governance', () => renderControlCenterWorkspace('governance')],
+  ['/systems/contracts/registry', () => renderContractsWorkspace('registry')],
+  ['/systems/contracts/milestones', () => renderContractsWorkspace('milestones')],
   ['/systems/subcontractors/contracts', () => renderSubcontractorsWorkspace('contracts')],
   ['/systems/subcontractors/payments', () => renderSubcontractorsWorkspace('payments')],
   ['/systems/printing/templates', () => renderPrintingWorkspace('templates')],

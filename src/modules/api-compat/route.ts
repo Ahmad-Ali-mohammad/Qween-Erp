@@ -12,6 +12,7 @@ import * as purchaseOrderService from '../purchase-orders/service';
 import * as quoteService from '../quotes/service';
 import * as taxDeclarationService from '../tax-declarations/service';
 import * as budgetingService from '../budgeting/service';
+import * as contractsService from '../contracts/service';
 import { applyLedgerLines } from '../shared/ledger';
 import { resolvePostingAccounts } from '../shared/posting-accounts';
 import { buildSalesForecastFromInvoices } from '../analytics/sales-forecast.service';
@@ -2426,54 +2427,33 @@ router.post('/payroll/:id/pay', async (req: Request, res: Response) => {
 
 router.post('/contracts/:id/approve', async (req: Request, res: Response) => {
   const id = parsePositiveInt(req.params.id, 'contractId');
-  const current = await prisma.contract.findUnique({ where: { id } });
-  if (!current) throw Errors.notFound('????? ??? ?????');
-  if (current.status !== 'DRAFT') throw Errors.business('???? ?????? ??? ????? ???');
-  ok(res, await prisma.contract.update({ where: { id }, data: { status: 'APPROVED' } }));
+  ok(res, await contractsService.approveContract(id, Number((req as AuthRequest).user?.id ?? 0)));
 });
 
 router.post('/contracts/:id/renew', async (req: Request, res: Response) => {
   const id = parsePositiveInt(req.params.id, 'contractId');
   const months = Number(req.body?.months ?? 12);
-  const current = await prisma.contract.findUnique({ where: { id } });
-  if (!current) throw Errors.notFound('????? ??? ?????');
-  if (!['APPROVED', 'RENEWED'].includes(String(current.status))) {
-    throw Errors.business('???? ????? ??? ????? ?? ???? ???');
-  }
-  const nextEnd = current.endDate ? new Date(current.endDate) : new Date();
-  nextEnd.setUTCMonth(nextEnd.getUTCMonth() + months);
-  ok(res, await prisma.contract.update({ where: { id }, data: { status: 'RENEWED', endDate: nextEnd } }));
+  ok(res, await contractsService.renewContract(id, months, Number((req as AuthRequest).user?.id ?? 0)));
 });
 
 router.post('/contracts/:id/terminate', async (req: Request, res: Response) => {
   const id = parsePositiveInt(req.params.id, 'contractId');
-  const current = await prisma.contract.findUnique({ where: { id } });
-  if (!current) throw Errors.notFound('????? ??? ?????');
-  if (current.status === 'TERMINATED') throw Errors.business('????? ????? ??????');
-  ok(res, await prisma.contract.update({ where: { id }, data: { status: 'TERMINATED' } }));
+  ok(res, await contractsService.terminateContract(id, Number((req as AuthRequest).user?.id ?? 0)));
 });
 
 router.put('/milestones/:id', async (req: Request, res: Response) => {
   const id = parsePositiveInt(req.params.id, 'milestoneId');
-  ok(res, await prisma.contractMilestone.update({ where: { id }, data: req.body }));
+  ok(res, await contractsService.updateContractMilestone(id, req.body, Number((req as AuthRequest).user?.id ?? 0)));
 });
 
 router.delete('/milestones/:id', async (req: Request, res: Response) => {
   const id = parsePositiveInt(req.params.id, 'milestoneId');
-  await prisma.contractMilestone.delete({ where: { id } });
-  ok(res, { deleted: true });
+  ok(res, await contractsService.deleteContractMilestone(id, Number((req as AuthRequest).user?.id ?? 0)));
 });
 
 router.post('/milestones/:id/complete', async (req: Request, res: Response) => {
   const id = parsePositiveInt(req.params.id, 'milestoneId');
-  const current = await prisma.contractMilestone.findUnique({ where: { id } });
-  if (!current) throw Errors.notFound('????? ????? ??? ??????');
-  if (current.status === 'COMPLETED') throw Errors.business('??????? ?????? ??????');
-  const contract = await prisma.contract.findUnique({ where: { id: current.contractId } });
-  if (!contract || !['APPROVED', 'RENEWED'].includes(String(contract.status))) {
-    throw Errors.business('?? ???? ????? ????? ???? ??? ?????');
-  }
-  ok(res, await prisma.contractMilestone.update({ where: { id }, data: { status: 'COMPLETED' } }));
+  ok(res, await contractsService.completeContractMilestone(id, Number((req as AuthRequest).user?.id ?? 0)));
 });
 
 const helpArticles = [
