@@ -1,3 +1,4 @@
+import { qw } from '../../utils/where';
 import { prisma } from '../../config/database';
 import { enqueueOutboxEvent } from '../../platform/events/outbox';
 import { awardOpportunityWithTransaction } from '../crm/opportunities.service';
@@ -153,20 +154,8 @@ export async function listTenders(query: any) {
   }
 
   const [rows, total] = await Promise.all([
-    prisma.tender.findMany({
-      where,
-      skip,
-      take: limit,
-      include: {
-        branch: { select: { id: true, code: true, nameAr: true } },
-        customer: { select: { id: true, code: true, nameAr: true } },
-        opportunity: { select: { id: true, title: true, stage: true, status: true } },
-        estimateLines: { orderBy: { lineNumber: 'asc' } },
-        competitors: { orderBy: [{ rank: 'asc' }, { id: 'asc' }] }
-      },
-      orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }]
-    }),
-    prisma.tender.count({ where })
+    prisma.orm.public.Tender.where((r) => qw(r, where)).include('branch', (inc) => inc.select('id', 'code', 'nameAr')).include('customer', (inc) => inc.select('id', 'code', 'nameAr')).include('opportunity', (inc) => inc.select('id', 'title', 'stage', 'status')).include('estimateLines', (inc) => inc.orderBy((r) => r.lineNumber.asc())).include('competitors', (inc) => inc.orderBy([(r) => r.rank.asc(), (r) => r.id.asc()])).orderBy([(r) => r.updatedAt.desc(), (r) => r.id.desc()]).offset(skip).limit(limit).all(),
+    prisma.orm.public.Tender.where((r) => qw(r, where)).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n)
   ]);
 
   return {
@@ -181,11 +170,11 @@ export async function listTenders(query: any) {
 }
 
 export async function getTender(id: number) {
-  return prisma.$transaction((tx) => fetchTender(tx, id));
+  return prisma.transaction(async (tx) => fetchTender(tx, id));
 }
 
 export async function createTender(data: any, userId: number) {
-  return prisma.$transaction(async (tx) => {
+  return prisma.transaction(async (tx) => {{
     const { opportunityId, customerId, branchId } = await resolveTenderContext(tx, data);
     const estimateLines = normalizeEstimateLines(data.estimateLines ?? []);
     const competitors = normalizeCompetitors(data.competitors ?? []);
@@ -193,8 +182,7 @@ export async function createTender(data: any, userId: number) {
     const offeredValue = normalizeAmount(data.offeredValue ?? estimatedValue, 'قيمة العرض') ?? estimatedValue;
     const guaranteeAmount = normalizeAmount(data.guaranteeAmount, 'قيمة الضمان', true) ?? 0;
 
-    const tender = await tx.tender.create({
-      data: {
+    const tender = await tx.orm.public.Tender.create({
         number: data.number ?? (await generateTenderNumber(tx)),
         title: String(data.title ?? '').trim(),
         branchId,
@@ -214,8 +202,7 @@ export async function createTender(data: any, userId: number) {
         competitors: {
           create: competitors
         }
-      }
-    });
+      });
 
     await enqueueOutboxEvent(tx, {
       eventType: 'tendering.tender.created',
@@ -235,18 +222,12 @@ export async function createTender(data: any, userId: number) {
     });
 
     return fetchTender(tx, tender.id);
-  });
+  }});
 }
 
 export async function updateTender(id: number, data: any, userId: number) {
-  return prisma.$transaction(async (tx) => {
-    const current = await tx.tender.findUnique({
-      where: { id },
-      include: {
-        estimateLines: true,
-        competitors: true
-      }
-    });
+  return prisma.transaction(async (tx) => {{
+    const current = await tx.orm.public.Tender.include('estimateLines').include('competitors').first({ id });
     if (!current) throw Errors.notFound('العطاء غير موجود');
     if (current.result) throw Errors.business('لا يمكن تعديل عطاء بعد تسجيل نتيجته');
 
@@ -257,12 +238,10 @@ export async function updateTender(id: number, data: any, userId: number) {
     const offeredValue = normalizeAmount(data.offeredValue ?? current.offeredValue ?? estimatedValue, 'قيمة العرض') ?? estimatedValue;
     const guaranteeAmount = normalizeAmount(data.guaranteeAmount ?? current.guaranteeAmount, 'قيمة الضمان', true) ?? 0;
 
-    await tx.tenderEstimateLine.deleteMany({ where: { tenderId: id } });
-    await tx.tenderCompetitor.deleteMany({ where: { tenderId: id } });
+    await tx.orm.public.TenderEstimateLine.where((r) => qw(r, { tenderId: id })).deleteAndCount().then((n0) => ({ count: n0 }));
+    await tx.orm.public.TenderCompetitor.where((r) => qw(r, { tenderId: id })).deleteAndCount().then((n0) => ({ count: n0 }));
 
-    await tx.tender.update({
-      where: { id },
-      data: {
+    await tx.orm.public.Tender.where((r) => qw(r, { id })).update({
         number: data.number ?? current.number,
         title: String(data.title ?? current.title).trim(),
         branchId,
@@ -289,8 +268,7 @@ export async function updateTender(id: number, data: any, userId: number) {
         competitors: {
           create: competitors
         }
-      }
-    });
+      }).then((r0) => r0!);
 
     await enqueueOutboxEvent(tx, {
       eventType: 'tendering.tender.updated',
@@ -309,29 +287,23 @@ export async function updateTender(id: number, data: any, userId: number) {
     });
 
     return fetchTender(tx, id);
-  });
+  }});
 }
 
 export async function submitTender(id: number, userId: number) {
-  return prisma.$transaction(async (tx) => {
-    const current = await tx.tender.findUnique({
-      where: { id },
-      include: { estimateLines: true }
-    });
+  return prisma.transaction(async (tx) => {{
+    const current = await tx.orm.public.Tender.include('estimateLines').first({ id });
     if (!current) throw Errors.notFound('العطاء غير موجود');
     if (current.result) throw Errors.business('تم تسجيل نتيجة هذا العطاء بالفعل');
     if (!current.estimateLines.length) throw Errors.business('لا يمكن إرسال عطاء بدون بنود تقدير');
     if (Number(current.offeredValue ?? 0) <= 0) throw Errors.business('قيمة العرض يجب أن تكون أكبر من صفر قبل الإرسال');
 
-    const updated = await tx.tender.update({
-      where: { id },
-      data: {
+    const updated = await tx.orm.public.Tender.where((r) => qw(r, { id })).update({
         status: 'SUBMITTED',
         approvalStatus: 'PENDING',
         submittedAt: new Date(),
         updatedById: userId
-      }
-    });
+      }).then((r0) => r0!);
 
     await enqueueOutboxEvent(tx, {
       eventType: 'tendering.tender.submitted',
@@ -349,12 +321,12 @@ export async function submitTender(id: number, userId: number) {
     });
 
     return fetchTender(tx, id);
-  });
+  }});
 }
 
 export async function recordTenderResult(id: number, data: any, userId: number) {
-  return prisma.$transaction(async (tx) => {
-    const current = await tx.tender.findUnique({ where: { id } });
+  return prisma.transaction(async (tx) => {{
+    const current = await tx.orm.public.Tender.first({ id });
     if (!current) throw Errors.notFound('العطاء غير موجود');
     if (current.result) throw Errors.business('تم تسجيل نتيجة هذا العطاء سابقًا');
 
@@ -399,9 +371,7 @@ export async function recordTenderResult(id: number, data: any, userId: number) 
       };
     }
 
-    await tx.tender.update({
-      where: { id },
-      data: {
+    await tx.orm.public.Tender.where((r) => qw(r, { id })).update({
         status: result,
         result,
         resultReason: normalizeText(data.resultReason),
@@ -411,8 +381,7 @@ export async function recordTenderResult(id: number, data: any, userId: number) 
         contractId,
         projectId,
         updatedById: userId
-      }
-    });
+      }).then((r0) => r0!);
 
     await enqueueOutboxEvent(tx, {
       eventType: 'tendering.tender.resulted',
@@ -433,5 +402,5 @@ export async function recordTenderResult(id: number, data: any, userId: number) 
     });
 
     return fetchTender(tx, id);
-  });
+  }});
 }

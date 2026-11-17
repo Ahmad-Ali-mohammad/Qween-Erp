@@ -1,4 +1,5 @@
 ﻿import { Request, Response } from 'express';
+import { qw } from '../../utils/where';
 import { prisma } from '../../config/database';
 import { ok } from '../../utils/response';
 import * as service from './service';
@@ -14,17 +15,7 @@ export async function create(req: any, res: Response) {
 }
 
 export async function getOne(req: Request, res: Response) {
-  const invoice = await prisma.invoice.findUnique({
-    where: { id: Number(req.params.id) },
-    include: {
-      customer: true,
-      supplier: true,
-      lines: true,
-      payments: { include: { payment: true } },
-      createdBy: true,
-      journalEntry: true
-    }
-  });
+  const invoice = await prisma.orm.public.Invoice.include('customer').include('supplier').include('lines').include('payments', (inc) => inc.include('payment')).include('createdBy').include('journalEntry').first((r) => qw(r, { id: Number(req.params.id) }));
   ok(res, invoice);
 }
 

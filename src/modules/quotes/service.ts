@@ -1,3 +1,4 @@
+import { qw } from '../../utils/where';
 import { prisma } from '../../config/database';
 import { enqueueOutboxEvent } from '../../platform/events/outbox';
 import { buildSequentialNumber } from '../../utils/id-generator';
@@ -6,14 +7,12 @@ import * as invoiceService from '../invoices/service';
 
 async function generateQuoteNumber(): Promise<string> {
   const year = new Date().getUTCFullYear();
-  const count = await prisma.salesQuote.count({
-    where: {
+  const count = await prisma.orm.public.SalesQuote.where((r) => qw(r, {
       date: {
         gte: new Date(Date.UTC(year, 0, 1)),
         lt: new Date(Date.UTC(year + 1, 0, 1))
       }
-    }
-  });
+    })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n);
   return buildSequentialNumber('QUOT', count, year);
 }
 
@@ -70,10 +69,7 @@ async function attachCustomers(quotes: any[]) {
   const customerIds = Array.from(new Set(quotes.map((quote) => Number(quote.customerId)).filter((id) => Number.isInteger(id) && id > 0)));
   if (!customerIds.length) return quotes;
 
-  const customers = await prisma.customer.findMany({
-    where: { id: { in: customerIds } },
-    select: { id: true, code: true, nameAr: true }
-  });
+  const customers = await prisma.orm.public.Customer.where((r) => qw(r, { id: { in: customerIds } })).select('id', 'code', 'nameAr').all();
   const customerMap = new Map(customers.map((customer) => [customer.id, customer]));
 
   return quotes.map((quote) => ({
@@ -88,9 +84,8 @@ export async function createQuote(data: any, userId: number) {
   const calc = calcQuoteLines(data.lines);
   const number = await generateQuoteNumber();
 
-  return prisma.$transaction(async (tx) => {
-    const quote = await tx.salesQuote.create({
-      data: {
+  return prisma.transaction(async (tx) => {{
+    const quote = await tx.orm.public.SalesQuote.create({
         number,
         branchId: data.branchId,
         customerId: data.customerId,
@@ -102,8 +97,7 @@ export async function createQuote(data: any, userId: number) {
         total: calc.total,
         notes: data.notes,
         lines: calc.mapped
-      }
-    });
+      });
 
     await enqueueOutboxEvent(tx, {
       eventType: 'crm.quote.created',
@@ -122,22 +116,17 @@ export async function createQuote(data: any, userId: number) {
     });
 
     return quote;
-  });
+  }});
 }
 
 export async function updateQuote(id: number, data: any) {
-  const quote = await prisma.salesQuote.findUnique({
-    where: { id }
-    // include: { customer: true } as any // Removed due to Prisma client generation issues
-  });
+  const quote = await prisma.orm.public.SalesQuote.first({ id });
   if (!quote) throw Errors.notFound('عرض السعر غير موجود');
   if (quote.status !== 'DRAFT') throw Errors.business('يمكن تعديل المسودة فقط');
 
   const calc = calcQuoteLines(data.lines ?? quote.lines);
 
-  return prisma.salesQuote.update({
-    where: { id },
-    data: {
+  return prisma.orm.public.SalesQuote.where((r) => qw(r, { id })).update({
       branchId: data.branchId ?? quote.branchId,
       validUntil: data.validUntil ? new Date(data.validUntil) : quote.validUntil,
       subtotal: calc.subtotal,
@@ -146,8 +135,7 @@ export async function updateQuote(id: number, data: any) {
       total: calc.total,
       notes: data.notes ?? quote.notes,
       lines: calc.mapped
-    }
-  });
+    }).then((r0) => r0!);
 }
 
 export async function listQuotes(query: any) {
@@ -166,13 +154,8 @@ export async function listQuotes(query: any) {
   }
 
   const [rows, total] = await Promise.all([
-    prisma.salesQuote.findMany({
-      where,
-      skip,
-      take: limit,
-      orderBy: [{ date: 'desc' }]
-    }),
-    prisma.salesQuote.count({ where })
+    prisma.orm.public.SalesQuote.where((r) => qw(r, where)).orderBy([(r) => r.date.desc()]).offset(skip).limit(limit).all(),
+    prisma.orm.public.SalesQuote.where((r) => qw(r, where)).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n)
   ]);
 
   const rowsWithCustomers = await attachCustomers(rows);
@@ -189,9 +172,7 @@ export async function listQuotes(query: any) {
 }
 
 export async function getQuote(id: number) {
-  const quote = await prisma.salesQuote.findUnique({
-    where: { id }
-  });
+  const quote = await prisma.orm.public.SalesQuote.first({ id });
   if (!quote) throw Errors.notFound('عرض السعر غير موجود');
 
   const [quoteWithCustomer] = await attachCustomers([quote]);
@@ -199,20 +180,15 @@ export async function getQuote(id: number) {
 }
 
 export async function sendQuote(id: number, userId: number) {
-  return prisma.$transaction(async (tx) => {
-    const quote = await tx.salesQuote.findUnique({
-      where: { id }
-    });
+  return prisma.transaction(async (tx) => {{
+    const quote = await tx.orm.public.SalesQuote.first({ id });
     if (!quote) throw Errors.notFound('عرض السعر غير موجود');
     if (quote.status !== 'DRAFT') throw Errors.business('يمكن إرسال المسودة فقط');
 
-    const updated = await tx.salesQuote.update({
-      where: { id },
-      data: {
+    const updated = await tx.orm.public.SalesQuote.where((r) => qw(r, { id })).update({
         status: 'SENT',
         approvalStatus: 'PENDING'
-      }
-    });
+      }).then((r0) => r0!);
 
     await enqueueOutboxEvent(tx, {
       eventType: 'crm.quote.sent',
@@ -231,13 +207,11 @@ export async function sendQuote(id: number, userId: number) {
     });
 
     return updated;
-  });
+  }});
 }
 
 export async function convertToInvoice(id: number, userId: number) {
-  const quote = await prisma.salesQuote.findUnique({
-    where: { id }
-  });
+  const quote = await prisma.orm.public.SalesQuote.first({ id });
   if (!quote) throw Errors.notFound('عرض السعر غير موجود');
   if (quote.status !== 'SENT' && quote.status !== 'ACCEPTED') throw Errors.business('يمكن تحويل العرض المرسل أو المقبول فقط');
   if (!quote.customerId) throw Errors.business('عرض السعر لا يحتوي على عميل صالح للتحويل');
@@ -264,13 +238,10 @@ export async function convertToInvoice(id: number, userId: number) {
     userId
   );
 
-  const updatedQuote = await prisma.salesQuote.update({
-    where: { id },
-    data: {
+  const updatedQuote = await prisma.orm.public.SalesQuote.where((r) => qw(r, { id })).update({
       status: 'CONVERTED',
       approvalStatus: 'APPROVED'
-    }
-  });
+    }).then((r0) => r0!);
 
   return {
     ...updatedQuote,
@@ -283,23 +254,20 @@ export async function updateQuoteStatus(id: number, status: string) {
   const validStatuses = ['DRAFT', 'SENT', 'ACCEPTED', 'REJECTED', 'EXPIRED', 'CONVERTED'];
   if (!validStatuses.includes(status)) throw Errors.validation('حالة غير صحيحة');
 
-  const quote = await prisma.salesQuote.findUnique({ where: { id } });
+  const quote = await prisma.orm.public.SalesQuote.first({ id });
   if (!quote) throw Errors.notFound('عرض السعر غير موجود');
 
-  return prisma.salesQuote.update({
-    where: { id },
-    data: {
+  return prisma.orm.public.SalesQuote.where((r) => qw(r, { id })).update({
       status,
       approvalStatus: resolveQuoteApprovalStatus(status)
-    }
-  });
+    }).then((r0) => r0!);
 }
 
 export async function deleteQuote(id: number) {
-  const quote = await prisma.salesQuote.findUnique({ where: { id } });
+  const quote = await prisma.orm.public.SalesQuote.first({ id });
   if (!quote) throw Errors.notFound('عرض السعر غير موجود');
   if (quote.status !== 'DRAFT') throw Errors.business('يمكن حذف المسودة فقط');
 
-  await prisma.salesQuote.delete({ where: { id } });
+  await prisma.orm.public.SalesQuote.where((r) => qw(r, { id })).delete().then((r0) => r0!);
   return { deleted: true, id };
 }

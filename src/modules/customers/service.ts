@@ -1,10 +1,11 @@
+import { qw } from '../../utils/where';
 import { Prisma } from '@prisma/client';
 import { prisma } from '../../config/database';
 import { buildSequentialNumber } from '../../utils/id-generator';
 import { Errors } from '../../utils/response';
 
 async function generateCustomerCode(): Promise<string> {
-  const count = await prisma.customer.count();
+  const count = await prisma.orm.public.Customer.aggregate((a) => ({ n: a.count() })).then((r0) => r0.n);
   return buildSequentialNumber('CUST', count, new Date().getUTCFullYear());
 }
 
@@ -30,13 +31,12 @@ export async function createCustomer(data: any) {
   if (!nameAr) throw Errors.validation('اسم العميل مطلوب');
 
   if (data.taxNumber) {
-    const existing = await prisma.customer.findFirst({ where: { taxNumber: String(data.taxNumber) } });
+    const existing = await prisma.orm.public.Customer.first((r) => qw(r, { taxNumber: String(data.taxNumber) }));
     if (existing) throw Errors.business('رقم الضريبي موجود مسبقًا');
   }
 
   const code = toNullableString(data.code) || (await generateCustomerCode());
-  return prisma.customer.create({
-    data: {
+  return prisma.orm.public.Customer.create({
       code,
       nameAr,
       nameEn: toNullableString(data.nameEn),
@@ -49,17 +49,16 @@ export async function createCustomer(data: any) {
       creditLimit: toNumber(data.creditLimit, 0),
       paymentTerms: Math.max(0, Math.trunc(toNumber(data.paymentTerms, 30))),
       isActive: toBoolean(data.isActive, true)
-    }
-  });
+    });
 }
 
 export async function updateCustomer(id: number, data: any) {
-  const customer = await prisma.customer.findUnique({ where: { id } });
+  const customer = await prisma.orm.public.Customer.first({ id });
   if (!customer) throw Errors.notFound('العميل غير موجود');
 
   const nextTax = toNullableString(data.taxNumber);
   if (nextTax && nextTax !== customer.taxNumber) {
-    const existing = await prisma.customer.findFirst({ where: { taxNumber: nextTax, id: { not: id } } });
+    const existing = await prisma.orm.public.Customer.first((r) => qw(r, { taxNumber: nextTax, id: { not: id } }));
     if (existing) throw Errors.business('رقم الضريبي موجود مسبقًا');
   }
 
@@ -80,10 +79,7 @@ export async function updateCustomer(id: number, data: any) {
   if (data.paymentTerms !== undefined) updateData.paymentTerms = Math.max(0, Math.trunc(toNumber(data.paymentTerms, 30)));
   if (data.isActive !== undefined) updateData.isActive = toBoolean(data.isActive, customer.isActive);
 
-  return prisma.customer.update({
-    where: { id },
-    data: updateData
-  });
+  return prisma.orm.public.Customer.where((r) => qw(r, { id })).update(updateData).then((r0) => r0!);
 }
 
 export async function listCustomers(query: any) {
@@ -105,8 +101,8 @@ export async function listCustomers(query: any) {
   if (query.isActive !== undefined) where.isActive = String(query.isActive) === 'true';
 
   const [rows, total] = await Promise.all([
-    prisma.customer.findMany({ where, skip, take: limit, orderBy: [{ nameAr: 'asc' }] }),
-    prisma.customer.count({ where })
+    prisma.orm.public.Customer.where((r) => qw(r, where)).orderBy([(r) => r.nameAr.asc()]).offset(skip).limit(limit).all(),
+    prisma.orm.public.Customer.where((r) => qw(r, where)).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n)
   ]);
 
   return {
@@ -147,25 +143,19 @@ export async function deleteCustomer(id: number) {
   if (customer.invoices.length > 0 || customer.payments.length > 0) {
     throw Errors.business('لا يمكن حذف العميل لوجود فواتير أو مدفوعات مرتبطة به');
   }
-  await prisma.customer.delete({ where: { id } });
+  await prisma.orm.public.Customer.where((r) => qw(r, { id })).delete().then((r0) => r0!);
   return { deleted: true, id };
 }
 
 export async function getCustomerStatement(id: number, query: any) {
-  const customer = await prisma.customer.findUnique({ where: { id } });
+  const customer = await prisma.orm.public.Customer.first({ id });
   if (!customer) throw Errors.notFound('العميل غير موجود');
 
   const startDate = query.startDate ? new Date(String(query.startDate)) : new Date(customer.createdAt);
   const endDate = query.endDate ? new Date(String(query.endDate)) : new Date();
   const [invoices, payments] = await Promise.all([
-    prisma.invoice.findMany({
-      where: { customerId: id, type: 'SALES', date: { gte: startDate, lte: endDate } },
-      orderBy: { date: 'asc' }
-    }),
-    prisma.payment.findMany({
-      where: { customerId: id, date: { gte: startDate, lte: endDate } },
-      orderBy: { date: 'asc' }
-    })
+    prisma.orm.public.Invoice.where((r) => qw(r, { customerId: id, type: 'SALES', date: { gte: startDate, lte: endDate } })).orderBy((r) => r.date.asc()).all(),
+    prisma.orm.public.Payment.where((r) => qw(r, { customerId: id, date: { gte: startDate, lte: endDate } })).orderBy((r) => r.date.asc()).all()
   ]);
 
   const transactions = [

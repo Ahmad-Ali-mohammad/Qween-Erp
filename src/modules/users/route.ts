@@ -1,4 +1,5 @@
 ﻿import { Router } from 'express';
+import { qw } from '../../utils/where';
 import bcrypt from 'bcryptjs';
 import { z } from 'zod';
 import { prisma } from '../../config/database';
@@ -25,22 +26,20 @@ const router = Router();
 router.use(authenticate, requirePermissions(PERMISSIONS.USERS_READ));
 
 router.get('/', async (_req, res) => {
-  const users = await prisma.user.findMany({ include: { role: true }, orderBy: { id: 'desc' } });
+  const users = await prisma.orm.public.User.include('role').orderBy((r) => r.id.desc()).all();
   ok(res, users);
 });
 
 router.post('/', requirePermissions(PERMISSIONS.USERS_WRITE), validateBody(createSchema), async (req, res, next) => {
   try {
-    const exists = await prisma.user.findFirst({ where: { OR: [{ username: req.body.username }, { email: req.body.email }] } });
+    const exists = await prisma.orm.public.User.first((r) => qw(r, { OR: [{ username: req.body.username }, { email: req.body.email }] }));
     if (exists) throw Errors.conflict('اسم المستخدم أو البريد موجود بالفعل');
 
     const password = await bcrypt.hash(req.body.password, env.bcryptRounds);
-    const user = await prisma.user.create({
-      data: {
+    const user = await prisma.orm.public.User.create({
         ...req.body,
         password
-      }
-    });
+      });
 
     ok(res, user, undefined, 201);
   } catch (error) {
@@ -50,7 +49,7 @@ router.post('/', requirePermissions(PERMISSIONS.USERS_WRITE), validateBody(creat
 
 router.get('/:id', async (req, res, next) => {
   try {
-    const user = await prisma.user.findUnique({ where: { id: Number(req.params.id) }, include: { role: true } });
+    const user = await prisma.orm.public.User.include('role').first((r) => qw(r, { id: Number(req.params.id) }));
     if (!user) throw Errors.notFound('المستخدم غير موجود');
     ok(res, user);
   } catch (error) {
@@ -63,7 +62,7 @@ router.put('/:id', requirePermissions(PERMISSIONS.USERS_WRITE), validateBody(upd
     const id = Number(req.params.id);
     const data = { ...req.body } as any;
     if (data.password) data.password = await bcrypt.hash(data.password, env.bcryptRounds);
-    const user = await prisma.user.update({ where: { id }, data });
+    const user = await prisma.orm.public.User.where((r) => qw(r, { id })).update(data).then((r0) => r0!);
     ok(res, user);
   } catch (error) {
     next(error);
@@ -73,7 +72,7 @@ router.put('/:id', requirePermissions(PERMISSIONS.USERS_WRITE), validateBody(upd
 router.delete('/:id', requirePermissions(PERMISSIONS.USERS_WRITE), async (req, res, next) => {
   try {
     const id = Number(req.params.id);
-    await prisma.user.delete({ where: { id } });
+    await prisma.orm.public.User.where((r) => qw(r, { id })).delete().then((r0) => r0!);
     ok(res, { id, deleted: true });
   } catch (error) {
     next(error);

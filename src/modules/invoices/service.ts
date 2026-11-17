@@ -1,3 +1,4 @@
+import { qw } from '../../utils/where';
 import { prisma } from '../../config/database';
 import { enqueueOutboxEvent } from '../../platform/events/outbox';
 import { parseDateOrThrow } from '../../utils/date';
@@ -255,19 +256,19 @@ export async function issueInvoiceInTransaction(tx: any, id: number, userId: num
 }
 
 export async function createInvoice(data: any, userId: number) {
-  return prisma.$transaction((tx) => createInvoiceInTransaction(tx, data, userId));
+  return prisma.transaction(async (tx) => createInvoiceInTransaction(tx, data, userId));
 }
 
 export async function issueInvoice(id: number, userId: number) {
-  return prisma.$transaction((tx) => issueInvoiceInTransaction(tx, id, userId));
+  return prisma.transaction(async (tx) => issueInvoiceInTransaction(tx, id, userId));
 }
 
 export async function updateInvoice(id: number, data: any) {
-  const current = await prisma.invoice.findUnique({ where: { id }, include: { lines: true } });
+  const current = await prisma.orm.public.Invoice.include('lines').first({ id });
   if (!current) throw Errors.notFound('الفاتورة غير موجودة');
   if (current.status !== 'DRAFT') throw Errors.business('لا يمكن تعديل فاتورة بعد الإصدار');
 
-  return prisma.$transaction(async (tx) => {
+  return prisma.transaction(async (tx) => {{
     const nextLines = data.lines ?? current.lines.map((l) => ({
       itemId: l.itemId,
       description: l.description,
@@ -280,9 +281,7 @@ export async function updateInvoice(id: number, data: any) {
 
     const calc = calcLines(nextLines);
 
-    const invoice = await tx.invoice.update({
-      where: { id },
-      data: {
+    const invoice = await tx.orm.public.Invoice.where((r) => qw(r, { id })).update({
         type: data.type ?? current.type,
         branchId: data.branchId ?? current.branchId,
         customerId: data.customerId ?? current.customerId,
@@ -297,40 +296,34 @@ export async function updateInvoice(id: number, data: any) {
         vatAmount: calc.vatAmount,
         total: calc.total,
         outstanding: calc.total
-      }
-    });
+      }).then((r0) => r0!);
 
     if (data.lines) {
-      await tx.invoiceLine.deleteMany({ where: { invoiceId: id } });
-      await tx.invoiceLine.createMany({
-        data: calc.mapped.map((line) => ({ ...line, invoiceId: id }))
-      });
+      await tx.orm.public.InvoiceLine.where((r) => qw(r, { invoiceId: id })).deleteAndCount().then((n0) => ({ count: n0 }));
+      await tx.orm.public.InvoiceLine.createAll(calc.mapped.map((line) => ({ ...line, invoiceId: id }))).then((rows) => ({ count: rows.length }));
     }
 
     return invoice;
-  });
+  }});
 }
 
 export async function cancelInvoice(id: number, reason?: string) {
-  const invoice = await prisma.invoice.findUnique({ where: { id } });
+  const invoice = await prisma.orm.public.Invoice.first({ id });
   if (!invoice) throw Errors.notFound('الفاتورة غير موجودة');
   if (invoice.status === 'CANCELLED') throw Errors.business('الفاتورة ملغاة مسبقًا');
   if (Number(invoice.paidAmount) > 0) throw Errors.business('لا يمكن إلغاء فاتورة مدفوعة جزئيًا/كليًا');
 
-  return prisma.invoice.update({
-    where: { id },
-    data: {
+  return prisma.orm.public.Invoice.where((r) => qw(r, { id })).update({
       status: 'CANCELLED',
       notes: reason ? `${invoice.notes ?? ''}\nإلغاء: ${reason}`.trim() : invoice.notes
-    }
-  });
+    }).then((r0) => r0!);
 }
 
 export async function deleteInvoice(id: number) {
-  const invoice = await prisma.invoice.findUnique({ where: { id } });
+  const invoice = await prisma.orm.public.Invoice.first({ id });
   if (!invoice) throw Errors.notFound('الفاتورة غير موجودة');
   if (invoice.status !== 'DRAFT') throw Errors.business('يمكن حذف الفاتورة المسودة فقط');
-  await prisma.invoice.delete({ where: { id } });
+  await prisma.orm.public.Invoice.where((r) => qw(r, { id })).delete().then((r0) => r0!);
   return { deleted: true, id };
 }
 
@@ -349,14 +342,8 @@ export async function listInvoices(query: any) {
   else if (Array.isArray(query.projectIds) && query.projectIds.length) where.projectId = { in: query.projectIds.map(Number) };
 
   const [rows, total] = await Promise.all([
-    prisma.invoice.findMany({
-      where,
-      skip,
-      take: limit,
-      include: { customer: true, supplier: true, lines: true, createdBy: true },
-      orderBy: [{ date: 'desc' }, { id: 'desc' }]
-    }),
-    prisma.invoice.count({ where })
+    prisma.orm.public.Invoice.where((r) => qw(r, where)).include('customer').include('supplier').include('lines').include('createdBy').orderBy([(r) => r.date.desc(), (r) => r.id.desc()]).offset(skip).limit(limit).all(),
+    prisma.orm.public.Invoice.where((r) => qw(r, where)).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n)
   ]);
 
   return {

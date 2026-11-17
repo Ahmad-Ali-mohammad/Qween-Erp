@@ -1,4 +1,5 @@
 ﻿import { Request, Response } from 'express';
+import { qw } from '../../utils/where';
 import { prisma } from '../../config/database';
 import { ok } from '../../utils/response';
 import * as service from './service';
@@ -14,15 +15,7 @@ export async function create(req: any, res: Response) {
 }
 
 export async function getOne(req: Request, res: Response) {
-  const entry = await prisma.journalEntry.findUnique({
-    where: { id: Number(req.params.id) },
-    include: {
-      createdBy: true,
-      postedBy: true,
-      period: { include: { fiscalYear: true } },
-      lines: { include: { account: true, project: true, department: true, costCenter: true }, orderBy: { lineNumber: 'asc' } }
-    }
-  });
+  const entry = await prisma.orm.public.JournalEntry.include('createdBy').include('postedBy').include('period', (inc) => inc.include('fiscalYear')).include('lines', (inc) => inc.include('account').include('project').include('department').include('costCenter').orderBy((r) => r.lineNumber.asc())).first((r) => qw(r, { id: Number(req.params.id) }));
   ok(res, entry);
 }
 

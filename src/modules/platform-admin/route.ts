@@ -1,3 +1,4 @@
+import { qw } from '../../utils/where';
 import { Prisma } from '@prisma/client';
 import { Router, Request, Response } from 'express';
 import { z } from 'zod';
@@ -274,38 +275,38 @@ router.put(
 
 router.get('/users/:id/permissions', requirePermissions(PERMISSIONS.USERS_READ), async (req: Request, res: Response) => {
   const id = parseIdParam(req);
-  const row = await prisma.user.findUnique({ where: { id }, include: { role: true } });
+  const row = await prisma.orm.public.User.include('role').first({ id });
   ok(res, row?.role?.permissions ?? {});
 });
 
 router.put('/users/:id/permissions', requirePermissions(PERMISSIONS.USERS_WRITE), async (req: Request, res: Response) => {
   const id = parseIdParam(req);
-  const user = await prisma.user.findUnique({ where: { id } });
+  const user = await prisma.orm.public.User.first({ id });
   if (!user) throw Errors.notFound('المستخدم غير موجود');
 
-  const role = await prisma.role.findUnique({ where: { id: user.roleId } });
+  const role = await prisma.orm.public.Role.first({ id: user.roleId });
   if (!role) throw Errors.notFound('الدور غير موجود');
 
-  const row = await prisma.role.update({ where: { id: role.id }, data: { permissions: req.body ?? {} } });
+  const row = await prisma.orm.public.Role.where((r) => qw(r, { id: role.id })).update({ permissions: req.body ?? {} }).then((r0) => r0!);
   ok(res, row.permissions ?? {});
 });
 
 router.get('/roles/:id', requirePermissions(PERMISSIONS.ROLES_READ), async (req: Request, res: Response) => {
-  ok(res, await prisma.role.findUnique({ where: { id: parseIdParam(req) } }));
+  ok(res, await prisma.orm.public.Role.first((r) => qw(r, { id: parseIdParam(req) })));
 });
 
 router.get('/roles/:id/permissions', requirePermissions(PERMISSIONS.ROLES_READ), async (req: Request, res: Response) => {
-  const row = await prisma.role.findUnique({ where: { id: parseIdParam(req) } });
+  const row = await prisma.orm.public.Role.first((r) => qw(r, { id: parseIdParam(req) }));
   ok(res, row?.permissions ?? {});
 });
 
 router.put('/roles/:id/permissions', requirePermissions(PERMISSIONS.ROLES_WRITE), async (req: Request, res: Response) => {
-  const row = await prisma.role.update({ where: { id: parseIdParam(req) }, data: { permissions: req.body ?? {} } });
+  const row = await prisma.orm.public.Role.where((r) => qw(r, { id: parseIdParam(req) })).update({ permissions: req.body ?? {} }).then((r0) => r0!);
   ok(res, row.permissions ?? {});
 });
 
 router.get('/integrations', requirePermissions(PERMISSIONS.INTEGRATIONS_READ), async (_req: Request, res: Response) => {
-  ok(res, await prisma.integrationSetting.findMany({ orderBy: { id: 'desc' } }));
+  ok(res, await prisma.orm.public.IntegrationSetting.orderBy((r) => r.id.desc()).all());
 });
 
 router.get('/integrations/:name', requirePermissions(PERMISSIONS.INTEGRATIONS_READ), async (req: Request, res: Response) => {
@@ -329,16 +330,16 @@ router.put(
 
 router.put('/integrations/:name/settings', requirePermissions(PERMISSIONS.INTEGRATIONS_WRITE), async (req: Request, res: Response) => {
   const key = String(req.params.name);
-  const existing = await prisma.integrationSetting.findUnique({ where: { key } });
+  const existing = await prisma.orm.public.IntegrationSetting.first({ key });
   const row = existing
-    ? await prisma.integrationSetting.update({ where: { key }, data: { settings: req.body ?? {}, status: 'ACTIVE' } })
-    : await prisma.integrationSetting.create({ data: { key, settings: req.body ?? {}, isEnabled: true, status: 'ACTIVE' } });
+    ? await prisma.orm.public.IntegrationSetting.where((r) => qw(r, { key })).update({ settings: req.body ?? {}, status: 'ACTIVE' }).then((r0) => r0!)
+    : await prisma.orm.public.IntegrationSetting.create({ key, settings: req.body ?? {}, isEnabled: true, status: 'ACTIVE' });
   ok(res, row);
 });
 
 router.post('/integrations/:name/test', requirePermissions(PERMISSIONS.INTEGRATIONS_READ), async (req: Request, res: Response) => {
   const key = String(req.params.name);
-  const row = await prisma.integrationSetting.findUnique({ where: { key } });
+  const row = await prisma.orm.public.IntegrationSetting.first({ key });
   ok(res, { name: key, connected: Boolean(row), testedAt: new Date().toISOString() });
 });
 

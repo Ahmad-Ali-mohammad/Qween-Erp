@@ -1,4 +1,5 @@
 ﻿import { Router } from 'express';
+import { qw } from '../../utils/where';
 import { z } from 'zod';
 import { prisma } from '../../config/database';
 import { authenticate } from '../../middleware/auth';
@@ -29,22 +30,20 @@ const router = Router();
 router.use(authenticate, requirePermissions(PERMISSIONS.FISCAL_READ));
 
 router.get('/years', async (_req, res) => {
-  const years = await prisma.fiscalYear.findMany({ include: { periods: true }, orderBy: { id: 'desc' } });
+  const years = await prisma.orm.public.FiscalYear.include('periods').orderBy((r) => r.id.desc()).all();
   ok(res, years);
 });
 
 router.post('/years', requirePermissions(PERMISSIONS.FISCAL_WRITE), validateBody(fySchema), async (req, res, next) => {
   try {
     if (req.body.isCurrent) {
-      await prisma.fiscalYear.updateMany({ data: { isCurrent: false } });
+      await prisma.orm.public.FiscalYear.where((r) => qw(r, {})).updateAndCount({ isCurrent: false }).then((n0) => ({ count: n0 }));
     }
-    const year = await prisma.fiscalYear.create({
-      data: {
+    const year = await prisma.orm.public.FiscalYear.create({
         ...req.body,
         startDate: new Date(req.body.startDate),
         endDate: new Date(req.body.endDate)
-      }
-    });
+      });
     ok(res, year, undefined, 201);
   } catch (error) {
     next(error);
@@ -54,10 +53,10 @@ router.post('/years', requirePermissions(PERMISSIONS.FISCAL_WRITE), validateBody
 router.post('/years/:id/set-current', requirePermissions(PERMISSIONS.FISCAL_WRITE), async (req, res, next) => {
   try {
     const id = Number(req.params.id);
-    const target = await prisma.fiscalYear.findUnique({ where: { id } });
+    const target = await prisma.orm.public.FiscalYear.first({ id });
     if (!target) throw Errors.notFound('السنة المالية غير موجودة');
-    await prisma.fiscalYear.updateMany({ data: { isCurrent: false } });
-    const year = await prisma.fiscalYear.update({ where: { id }, data: { isCurrent: true } });
+    await prisma.orm.public.FiscalYear.where((r) => qw(r, {})).updateAndCount({ isCurrent: false }).then((n0) => ({ count: n0 }));
+    const year = await prisma.orm.public.FiscalYear.where((r) => qw(r, { id })).update({ isCurrent: true }).then((r0) => r0!);
     ok(res, year);
   } catch (error) {
     next(error);
@@ -65,19 +64,17 @@ router.post('/years/:id/set-current', requirePermissions(PERMISSIONS.FISCAL_WRIT
 });
 
 router.get('/periods', async (_req, res) => {
-  const periods = await prisma.accountingPeriod.findMany({ include: { fiscalYear: true }, orderBy: [{ fiscalYearId: 'desc' }, { number: 'asc' }] });
+  const periods = await prisma.orm.public.AccountingPeriod.include('fiscalYear').orderBy([(r) => r.fiscalYearId.desc(), (r) => r.number.asc()]).all();
   ok(res, periods);
 });
 
 router.post('/periods', requirePermissions(PERMISSIONS.FISCAL_WRITE), validateBody(periodSchema), async (req, res, next) => {
   try {
-    const p = await prisma.accountingPeriod.create({
-      data: {
+    const p = await prisma.orm.public.AccountingPeriod.create({
         ...req.body,
         startDate: new Date(req.body.startDate),
         endDate: new Date(req.body.endDate)
-      }
-    });
+      });
     ok(res, p, undefined, 201);
   } catch (error) {
     next(error);
@@ -86,10 +83,7 @@ router.post('/periods', requirePermissions(PERMISSIONS.FISCAL_WRITE), validateBo
 
 router.post('/periods/:id/close', requirePermissions(PERMISSIONS.FISCAL_WRITE), async (req: any, res, next) => {
   try {
-    const p = await prisma.accountingPeriod.update({
-      where: { id: Number(req.params.id) },
-      data: { status: 'CLOSED', canPost: false, closedAt: new Date(), closedBy: req.user?.id }
-    });
+    const p = await prisma.orm.public.AccountingPeriod.where((r) => qw(r, { id: Number(req.params.id) })).update({ status: 'CLOSED', canPost: false, closedAt: new Date(), closedBy: req.user?.id }).then((r0) => r0!);
     ok(res, p);
   } catch (error) {
     next(error);
@@ -98,10 +92,7 @@ router.post('/periods/:id/close', requirePermissions(PERMISSIONS.FISCAL_WRITE), 
 
 router.post('/periods/:id/open', requirePermissions(PERMISSIONS.FISCAL_WRITE), async (req, res, next) => {
   try {
-    const p = await prisma.accountingPeriod.update({
-      where: { id: Number(req.params.id) },
-      data: { status: 'OPEN', canPost: true, closedAt: null, closedBy: null }
-    });
+    const p = await prisma.orm.public.AccountingPeriod.where((r) => qw(r, { id: Number(req.params.id) })).update({ status: 'OPEN', canPost: true, closedAt: null, closedBy: null }).then((r0) => r0!);
     ok(res, p);
   } catch (error) {
     next(error);

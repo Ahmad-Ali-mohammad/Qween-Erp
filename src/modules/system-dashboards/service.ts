@@ -1,3 +1,4 @@
+import { qw } from '../../utils/where';
 import { prisma } from '../../config/database';
 import { getSystemDashboardDefinition, type SystemDashboardKey } from './catalog';
 
@@ -154,57 +155,29 @@ async function buildAccountingBundle(filters: DashboardFilters): Promise<SystemD
   const today = new Date();
 
   const [draftJournals, openPeriods, receivableAgg, payableAgg, bankAgg, unreconciledBanks, pendingPayments, draftTaxDeclarations] = await Promise.all([
-    prisma.journalEntry.count({ where: { status: 'DRAFT' } }),
-    prisma.accountingPeriod.count({ where: { status: 'OPEN' } }),
+    prisma.orm.public.JournalEntry.where((r) => qw(r, { status: 'DRAFT' })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n),
+    prisma.orm.public.AccountingPeriod.where((r) => qw(r, { status: 'OPEN' })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n),
     prisma.invoice.aggregate({ where: { ...branchFilter, type: 'SALES', outstanding: { gt: 0 } }, _sum: { outstanding: true } }),
     prisma.invoice.aggregate({ where: { ...branchFilter, type: 'PURCHASE', outstanding: { gt: 0 } }, _sum: { outstanding: true } }),
     prisma.bankAccount.aggregate({ _sum: { currentBalance: true } }),
-    prisma.bankTransaction.count({ where: { date: activityRange, isReconciled: false } }),
-    prisma.payment.count({ where: { ...branchFilter, status: 'PENDING' } }),
-    prisma.taxDeclaration.count({ where: { status: 'DRAFT' } })
+    prisma.orm.public.BankTransaction.where((r) => qw(r, { date: activityRange, isReconciled: false })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n),
+    prisma.orm.public.Payment.where((r) => qw(r, { ...branchFilter, status: 'PENDING' })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n),
+    prisma.orm.public.TaxDeclaration.where((r) => qw(r, { status: 'DRAFT' })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n)
   ]);
 
   const [overdueInvoices, recentJournals, recentInvoices, recentPayments, salesInvoices, purchaseInvoices] = await Promise.all([
-    prisma.invoice.count({
-      where: {
+    prisma.orm.public.Invoice.where((r) => qw(r, {
         ...branchFilter,
         type: 'SALES',
         dueDate: { lt: today },
         outstanding: { gt: 0 },
         status: { in: ['ISSUED', 'PARTIAL'] }
-      }
-    }),
-    prisma.journalEntry.findMany({
-      where: { date: activityRange },
-      take: 5,
-      orderBy: [{ date: 'desc' }, { id: 'desc' }],
-      select: { id: true, entryNumber: true, status: true, date: true, totalDebit: true }
-    }),
-    prisma.invoice.findMany({
-      where: { ...branchFilter, date: activityRange },
-      take: 5,
-      orderBy: [{ date: 'desc' }, { id: 'desc' }],
-      include: {
-        customer: { select: { nameAr: true } },
-        supplier: { select: { nameAr: true } }
-      }
-    }),
-    prisma.payment.findMany({
-      where: { ...branchFilter, date: activityRange },
-      take: 5,
-      orderBy: [{ date: 'desc' }, { id: 'desc' }],
-      select: { id: true, number: true, type: true, status: true, amount: true, date: true }
-    }),
-    prisma.invoice.findMany({
-      where: { ...branchFilter, type: 'SALES', status: { in: ['ISSUED', 'PAID', 'PARTIAL'] }, date: activityRange },
-      orderBy: { date: 'asc' },
-      select: { date: true, total: true }
-    }),
-    prisma.invoice.findMany({
-      where: { ...branchFilter, type: 'PURCHASE', status: { in: ['ISSUED', 'PAID', 'PARTIAL'] }, date: activityRange },
-      orderBy: { date: 'asc' },
-      select: { date: true, total: true }
-    })
+      })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n),
+    prisma.orm.public.JournalEntry.where((r) => qw(r, { date: activityRange })).select('id', 'entryNumber', 'status', 'date', 'totalDebit').orderBy([(r) => r.date.desc(), (r) => r.id.desc()]).limit(5).all(),
+    prisma.orm.public.Invoice.where((r) => qw(r, { ...branchFilter, date: activityRange })).include('customer', (inc) => inc.select('nameAr')).include('supplier', (inc) => inc.select('nameAr')).orderBy([(r) => r.date.desc(), (r) => r.id.desc()]).limit(5).all(),
+    prisma.orm.public.Payment.where((r) => qw(r, { ...branchFilter, date: activityRange })).select('id', 'number', 'type', 'status', 'amount', 'date').orderBy([(r) => r.date.desc(), (r) => r.id.desc()]).limit(5).all(),
+    prisma.orm.public.Invoice.where((r) => qw(r, { ...branchFilter, type: 'SALES', status: { in: ['ISSUED', 'PAID', 'PARTIAL'] }, date: activityRange })).select('date', 'total').orderBy((r) => r.date.asc()).all(),
+    prisma.orm.public.Invoice.where((r) => qw(r, { ...branchFilter, type: 'PURCHASE', status: { in: ['ISSUED', 'PAID', 'PARTIAL'] }, date: activityRange })).select('date', 'total').orderBy((r) => r.date.asc()).all()
   ]);
 
   const alerts: DashboardAlertItem[] = [];
@@ -292,39 +265,32 @@ async function buildCrmBundle(filters: DashboardFilters): Promise<SystemDashboar
   const soon = new Date(today.getTime() + 14 * 24 * 60 * 60 * 1000);
 
   const [customers, opportunities, wonOpportunities, pipelineAgg, quotesPending, overdueCollections, supportTickets, quotesExpiring] = await Promise.all([
-    prisma.customer.count({ where: quoteBranchFilter }),
-    prisma.opportunity.findMany({ orderBy: { updatedAt: 'desc' } }),
-    prisma.opportunity.count({ where: { status: 'WON' } }),
+    prisma.orm.public.Customer.where((r) => qw(r, quoteBranchFilter)).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n),
+    prisma.orm.public.Opportunity.orderBy((r) => r.updatedAt.desc()).all(),
+    prisma.orm.public.Opportunity.where((r) => qw(r, { status: 'WON' })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n),
     prisma.opportunity.aggregate({ where: { status: 'OPEN' }, _sum: { value: true } }),
-    prisma.salesQuote.count({ where: { ...quoteBranchFilter, status: { notIn: ['APPROVED', 'ACCEPTED', 'REJECTED'] } } }),
-    prisma.invoice.count({
-      where: {
+    prisma.orm.public.SalesQuote.where((r) => qw(r, { ...quoteBranchFilter, status: { notIn: ['APPROVED', 'ACCEPTED', 'REJECTED'] } })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n),
+    prisma.orm.public.Invoice.where((r) => qw(r, {
         ...quoteBranchFilter,
         type: 'SALES',
         dueDate: { lt: today },
         outstanding: { gt: 0 },
         status: { in: ['ISSUED', 'PARTIAL'] }
-      }
-    }),
-    prisma.supportTicket.count({ where: { status: { notIn: ['CLOSED', 'RESOLVED'] } } }),
-    prisma.salesQuote.count({ where: { ...quoteBranchFilter, validUntil: { gte: today, lte: soon } } })
+      })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n),
+    prisma.orm.public.SupportTicket.where((r) => qw(r, { status: { notIn: ['CLOSED', 'RESOLVED'] } })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n),
+    prisma.orm.public.SalesQuote.where((r) => qw(r, { ...quoteBranchFilter, validUntil: { gte: today, lte: soon } })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n)
   ]);
 
   const [recentOpportunities, recentQuotes, recentTickets, overdueInvoices] = await Promise.all([
-    prisma.opportunity.findMany({ take: 5, orderBy: { updatedAt: 'desc' } }),
-    prisma.salesQuote.findMany({ where: quoteBranchFilter, take: 5, orderBy: { updatedAt: 'desc' } }),
-    prisma.supportTicket.findMany({ take: 5, orderBy: { updatedAt: 'desc' } }),
-    prisma.invoice.findMany({
-      where: {
+    prisma.orm.public.Opportunity.orderBy((r) => r.updatedAt.desc()).limit(5).all(),
+    prisma.orm.public.SalesQuote.where((r) => qw(r, quoteBranchFilter)).orderBy((r) => r.updatedAt.desc()).limit(5).all(),
+    prisma.orm.public.SupportTicket.orderBy((r) => r.updatedAt.desc()).limit(5).all(),
+    prisma.orm.public.Invoice.where((r) => qw(r, {
         ...quoteBranchFilter,
         type: 'SALES',
         dueDate: { lt: today },
         outstanding: { gt: 0 }
-      },
-      take: 3,
-      orderBy: [{ dueDate: 'asc' }, { id: 'asc' }],
-      include: { customer: { select: { nameAr: true } } }
-    })
+      })).include('customer', (inc) => inc.select('nameAr')).orderBy([(r) => r.dueDate.asc(), (r) => r.id.asc()]).limit(3).all()
   ]);
 
   const totalOpportunities = opportunities.length;
@@ -415,30 +381,19 @@ async function buildHrBundle(filters: DashboardFilters): Promise<SystemDashboard
 
   const [activeEmployees, pendingLeaves, openPayrollRuns, draftTimesheets, attendanceExceptions, laborCostAgg, recentEmployees, recentLeaves, recentPayrollRuns, recentTimesheets] =
     await Promise.all([
-      prisma.employee.count({ where: { ...branchFilter, status: 'ACTIVE' } }),
-      prisma.leaveRequest.count({ where: { status: 'PENDING' } }),
-      prisma.payrollRun.count({ where: { ...branchFilter, status: { notIn: ['PAID', 'POSTED', 'CLOSED'] } } }),
-      prisma.timesheet.count({ where: { ...branchFilter, status: { not: 'APPROVED' } } }),
-      prisma.attendance.count({ where: { ...branchFilter, date: dateRange, status: { not: 'PRESENT' } } }),
+      prisma.orm.public.Employee.where((r) => qw(r, { ...branchFilter, status: 'ACTIVE' })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n),
+      prisma.orm.public.LeaveRequest.where((r) => qw(r, { status: 'PENDING' })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n),
+      prisma.orm.public.PayrollRun.where((r) => qw(r, { ...branchFilter, status: { notIn: ['PAID', 'POSTED', 'CLOSED'] } })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n),
+      prisma.orm.public.Timesheet.where((r) => qw(r, { ...branchFilter, status: { not: 'APPROVED' } })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n),
+      prisma.orm.public.Attendance.where((r) => qw(r, { ...branchFilter, date: dateRange, status: { not: 'PRESENT' } })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n),
       prisma.timesheet.aggregate({ where: { ...branchFilter, date: dateRange }, _sum: { amount: true } }),
-      prisma.employee.findMany({ where: branchFilter, take: 5, orderBy: { createdAt: 'desc' } }),
-      prisma.leaveRequest.findMany({ take: 5, orderBy: { updatedAt: 'desc' } }),
-      prisma.payrollRun.findMany({ where: branchFilter, take: 5, orderBy: { updatedAt: 'desc' } }),
-      prisma.timesheet.findMany({
-        where: { ...branchFilter, date: dateRange },
-        take: 5,
-        orderBy: [{ date: 'desc' }, { id: 'desc' }],
-        include: {
-          employee: { select: { fullName: true } },
-          project: { select: { nameAr: true } }
-        }
-      })
+      prisma.orm.public.Employee.where((r) => qw(r, branchFilter)).orderBy((r) => r.createdAt.desc()).limit(5).all(),
+      prisma.orm.public.LeaveRequest.orderBy((r) => r.updatedAt.desc()).limit(5).all(),
+      prisma.orm.public.PayrollRun.where((r) => qw(r, branchFilter)).orderBy((r) => r.updatedAt.desc()).limit(5).all(),
+      prisma.orm.public.Timesheet.where((r) => qw(r, { ...branchFilter, date: dateRange })).include('employee', (inc) => inc.select('fullName')).include('project', (inc) => inc.select('nameAr')).orderBy([(r) => r.date.desc(), (r) => r.id.desc()]).limit(5).all()
     ]);
 
-  const projectCostRows = await prisma.timesheet.findMany({
-    where: { ...branchFilter, date: dateRange },
-    include: { project: { select: { nameAr: true } } }
-  });
+  const projectCostRows = await prisma.orm.public.Timesheet.where((r) => qw(r, { ...branchFilter, date: dateRange })).include('project', (inc) => inc.select('nameAr')).all();
   const projectCostSeries = Array.from(
     projectCostRows.reduce((map, row) => {
       map.set(row.project.nameAr, (map.get(row.project.nameAr) ?? 0) + toNumber(row.amount));
@@ -449,7 +404,7 @@ async function buildHrBundle(filters: DashboardFilters): Promise<SystemDashboard
     .slice(0, 6)
     .map(([label, value]) => ({ label, value: Math.round(value) }));
 
-  const attendanceRows = await prisma.attendance.findMany({ where: { ...branchFilter, date: dateRange } });
+  const attendanceRows = await prisma.orm.public.Attendance.where((r) => qw(r, { ...branchFilter, date: dateRange })).all();
   const attendanceStatusSeries = Array.from(
     attendanceRows.reduce((map, row) => {
       map.set(row.status, (map.get(row.status) ?? 0) + 1);
@@ -526,22 +481,13 @@ async function buildProjectsBundle(filters: DashboardFilters): Promise<SystemDas
   const effectiveProjectFilter = { ...branchFilter, ...projectFilter };
 
   const [projects, tasks, expenses, milestones, recentProjects, recentTasks, recentExpenses] = await Promise.all([
-    prisma.project.findMany({ where: effectiveProjectFilter, orderBy: { updatedAt: 'desc' } }),
-    prisma.projectTask.findMany({ where: filters.projectId ? { projectId: filters.projectId } : {}, orderBy: { updatedAt: 'desc' } }),
-    prisma.projectExpense.findMany({
-      where: { ...(filters.projectId ? { projectId: filters.projectId } : {}), date: { gte: filters.dateFrom, lte: filters.dateTo } },
-      include: { project: { select: { nameAr: true } } },
-      orderBy: { date: 'desc' }
-    }),
-    prisma.contractMilestone.findMany({ orderBy: [{ dueDate: 'asc' }, { id: 'asc' }] }),
-    prisma.project.findMany({ where: effectiveProjectFilter, take: 5, orderBy: { updatedAt: 'desc' } }),
-    prisma.projectTask.findMany({ where: filters.projectId ? { projectId: filters.projectId } : {}, take: 5, orderBy: { updatedAt: 'desc' } }),
-    prisma.projectExpense.findMany({
-      where: { ...(filters.projectId ? { projectId: filters.projectId } : {}), date: { gte: filters.dateFrom, lte: filters.dateTo } },
-      include: { project: { select: { nameAr: true } } },
-      take: 5,
-      orderBy: { date: 'desc' }
-    })
+    prisma.orm.public.Project.where((r) => qw(r, effectiveProjectFilter)).orderBy((r) => r.updatedAt.desc()).all(),
+    prisma.orm.public.ProjectTask.where((r) => qw(r, filters.projectId ? { projectId: filters.projectId } : {})).orderBy((r) => r.updatedAt.desc()).all(),
+    prisma.orm.public.ProjectExpense.where((r) => qw(r, { ...(filters.projectId ? { projectId: filters.projectId } : {}), date: { gte: filters.dateFrom, lte: filters.dateTo } })).include('project', (inc) => inc.select('nameAr')).orderBy((r) => r.date.desc()).all(),
+    prisma.orm.public.ContractMilestone.orderBy([(r) => r.dueDate.asc(), (r) => r.id.asc()]).all(),
+    prisma.orm.public.Project.where((r) => qw(r, effectiveProjectFilter)).orderBy((r) => r.updatedAt.desc()).limit(5).all(),
+    prisma.orm.public.ProjectTask.where((r) => qw(r, filters.projectId ? { projectId: filters.projectId } : {})).orderBy((r) => r.updatedAt.desc()).limit(5).all(),
+    prisma.orm.public.ProjectExpense.where((r) => qw(r, { ...(filters.projectId ? { projectId: filters.projectId } : {}), date: { gte: filters.dateFrom, lte: filters.dateTo } })).include('project', (inc) => inc.select('nameAr')).orderBy((r) => r.date.desc()).limit(5).all()
   ]);
 
   const budgetTotal = projects.reduce((sum, row) => sum + toNumber(row.budget), 0);
@@ -619,23 +565,14 @@ async function buildProcurementBundle(filters: DashboardFilters): Promise<System
   const today = new Date();
 
   const [suppliers, purchaseOrders, receipts, supplierInvoices, pendingSupplierPayments, recentOrders, recentReceipts, recentSupplierInvoices] = await Promise.all([
-    prisma.supplier.count({ where: branchFilter }),
-    prisma.purchaseOrder.findMany({ where: branchFilter, orderBy: { updatedAt: 'desc' } }),
-    prisma.purchaseReceipt.findMany({ where: { date: dateRange }, orderBy: { updatedAt: 'desc' } }),
-    prisma.invoice.findMany({
-      where: { ...branchFilter, type: 'PURCHASE' },
-      include: { supplier: { select: { nameAr: true } } },
-      orderBy: { updatedAt: 'desc' }
-    }),
-    prisma.payment.count({ where: { ...branchFilter, type: 'PAYMENT', status: 'PENDING' } }),
-    prisma.purchaseOrder.findMany({ where: branchFilter, take: 5, orderBy: { updatedAt: 'desc' } }),
-    prisma.purchaseReceipt.findMany({ where: { date: dateRange }, take: 5, orderBy: { updatedAt: 'desc' } }),
-    prisma.invoice.findMany({
-      where: { ...branchFilter, type: 'PURCHASE' },
-      take: 5,
-      include: { supplier: { select: { nameAr: true } } },
-      orderBy: { updatedAt: 'desc' }
-    })
+    prisma.orm.public.Supplier.where((r) => qw(r, branchFilter)).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n),
+    prisma.orm.public.PurchaseOrder.where((r) => qw(r, branchFilter)).orderBy((r) => r.updatedAt.desc()).all(),
+    prisma.orm.public.PurchaseReceipt.where((r) => qw(r, { date: dateRange })).orderBy((r) => r.updatedAt.desc()).all(),
+    prisma.orm.public.Invoice.where((r) => qw(r, { ...branchFilter, type: 'PURCHASE' })).include('supplier', (inc) => inc.select('nameAr')).orderBy((r) => r.updatedAt.desc()).all(),
+    prisma.orm.public.Payment.where((r) => qw(r, { ...branchFilter, type: 'PAYMENT', status: 'PENDING' })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n),
+    prisma.orm.public.PurchaseOrder.where((r) => qw(r, branchFilter)).orderBy((r) => r.updatedAt.desc()).limit(5).all(),
+    prisma.orm.public.PurchaseReceipt.where((r) => qw(r, { date: dateRange })).orderBy((r) => r.updatedAt.desc()).limit(5).all(),
+    prisma.orm.public.Invoice.where((r) => qw(r, { ...branchFilter, type: 'PURCHASE' })).include('supplier', (inc) => inc.select('nameAr')).orderBy((r) => r.updatedAt.desc()).limit(5).all()
   ]);
 
   const openPurchaseOrders = purchaseOrders.filter((row) => !['CLOSED', 'RECEIVED', 'CANCELLED'].includes(String(row.status).toUpperCase()));
@@ -710,13 +647,13 @@ async function buildInventoryBundle(filters: DashboardFilters): Promise<SystemDa
   const dateRange = { gte: filters.dateFrom, lte: filters.dateTo };
 
   const [items, warehouses, stockCounts, movements, recentItems, recentCounts, recentMovements] = await Promise.all([
-    prisma.item.findMany({ orderBy: { updatedAt: 'desc' } }),
-    prisma.warehouse.findMany({ where: branchFilter, orderBy: { updatedAt: 'desc' } }),
-    prisma.stockCount.findMany({ orderBy: { updatedAt: 'desc' } }),
-    prisma.stockMovement.findMany({ where: { date: dateRange }, orderBy: { date: 'desc' } }),
-    prisma.item.findMany({ take: 5, orderBy: { updatedAt: 'desc' } }),
-    prisma.stockCount.findMany({ take: 5, orderBy: { updatedAt: 'desc' } }),
-    prisma.stockMovement.findMany({ where: { date: dateRange }, take: 5, orderBy: { date: 'desc' } })
+    prisma.orm.public.Item.orderBy((r) => r.updatedAt.desc()).all(),
+    prisma.orm.public.Warehouse.where((r) => qw(r, branchFilter)).orderBy((r) => r.updatedAt.desc()).all(),
+    prisma.orm.public.StockCount.orderBy((r) => r.updatedAt.desc()).all(),
+    prisma.orm.public.StockMovement.where((r) => qw(r, { date: dateRange })).orderBy((r) => r.date.desc()).all(),
+    prisma.orm.public.Item.orderBy((r) => r.updatedAt.desc()).limit(5).all(),
+    prisma.orm.public.StockCount.orderBy((r) => r.updatedAt.desc()).limit(5).all(),
+    prisma.orm.public.StockMovement.where((r) => qw(r, { date: dateRange })).orderBy((r) => r.date.desc()).limit(5).all()
   ]);
 
   const activeItems = items.filter((row) => row.isActive);
@@ -791,10 +728,10 @@ async function buildAssetsBundle(filters: DashboardFilters): Promise<SystemDashb
   const branchFilter = filters.branchId ? { branchId: filters.branchId } : {};
 
   const [assets, schedules, recentAssets, recentSchedules] = await Promise.all([
-    prisma.fixedAsset.findMany({ where: branchFilter, include: { category: { select: { nameAr: true } } }, orderBy: { updatedAt: 'desc' } }),
-    prisma.depreciationSchedule.findMany({ orderBy: { createdAt: 'desc' }, include: { asset: { select: { nameAr: true } } } }),
-    prisma.fixedAsset.findMany({ where: branchFilter, take: 5, include: { category: { select: { nameAr: true } } }, orderBy: { updatedAt: 'desc' } }),
-    prisma.depreciationSchedule.findMany({ take: 5, orderBy: { createdAt: 'desc' }, include: { asset: { select: { nameAr: true } } } })
+    prisma.orm.public.FixedAsset.where((r) => qw(r, branchFilter)).include('category', (inc) => inc.select('nameAr')).orderBy((r) => r.updatedAt.desc()).all(),
+    prisma.orm.public.DepreciationSchedule.include('asset', (inc) => inc.select('nameAr')).orderBy((r) => r.createdAt.desc()).all(),
+    prisma.orm.public.FixedAsset.where((r) => qw(r, branchFilter)).include('category', (inc) => inc.select('nameAr')).orderBy((r) => r.updatedAt.desc()).limit(5).all(),
+    prisma.orm.public.DepreciationSchedule.include('asset', (inc) => inc.select('nameAr')).orderBy((r) => r.createdAt.desc()).limit(5).all()
   ]);
 
   const activeAssets = assets.filter((row) => row.status === 'ACTIVE');
@@ -869,8 +806,8 @@ async function buildDocumentsBundle(filters: DashboardFilters): Promise<SystemDa
   const todayStart = startOfDay(new Date());
 
   const [documents, recentDocuments] = await Promise.all([
-    prisma.document.findMany({ where: branchFilter, orderBy: { updatedAt: 'desc' } }),
-    prisma.document.findMany({ where: branchFilter, take: 8, orderBy: { updatedAt: 'desc' } })
+    prisma.orm.public.Document.where((r) => qw(r, branchFilter)).orderBy((r) => r.updatedAt.desc()).all(),
+    prisma.orm.public.Document.where((r) => qw(r, branchFilter)).orderBy((r) => r.updatedAt.desc()).limit(8).all()
   ]);
 
   const uploadsToday = documents.filter((row) => row.createdAt >= todayStart).length;
@@ -929,9 +866,9 @@ async function buildContractsBundle(filters: DashboardFilters): Promise<SystemDa
   const nextThirtyDays = new Date(today.getTime() + 30 * 24 * 60 * 60 * 1000);
 
   const [contracts, milestones, recentContracts] = await Promise.all([
-    prisma.contract.findMany({ where: branchFilter, orderBy: { updatedAt: 'desc' } }),
-    prisma.contractMilestone.findMany({ orderBy: [{ dueDate: 'asc' }, { id: 'asc' }] }),
-    prisma.contract.findMany({ where: branchFilter, take: 6, orderBy: { updatedAt: 'desc' } })
+    prisma.orm.public.Contract.where((r) => qw(r, branchFilter)).orderBy((r) => r.updatedAt.desc()).all(),
+    prisma.orm.public.ContractMilestone.orderBy([(r) => r.dueDate.asc(), (r) => r.id.asc()]).all(),
+    prisma.orm.public.Contract.where((r) => qw(r, branchFilter)).orderBy((r) => r.updatedAt.desc()).limit(6).all()
   ]);
 
   const approvedContracts = contracts.filter((row) => row.approvalStatus === 'APPROVED');
@@ -998,45 +935,10 @@ async function buildSubcontractorsBundle(filters: DashboardFilters): Promise<Sys
   const today = new Date();
 
   const [subcontracts, ipcs] = await Promise.all([
-    prisma.subcontract.findMany({
-      where: branchFilter,
-      include: {
-        supplier: { select: { nameAr: true } },
-        project: { select: { nameAr: true } }
-      },
-      orderBy: { updatedAt: 'desc' }
-    }),
-    prisma.subcontractIpc.findMany({
-      where: {
+    prisma.orm.public.Subcontract.where((r) => qw(r, branchFilter)).include('supplier', (inc) => inc.select('nameAr')).include('project', (inc) => inc.select('nameAr')).orderBy((r) => r.updatedAt.desc()).all(),
+    prisma.orm.public.SubcontractIpc.where((r) => qw(r, {
         ...(filters.projectId ? { subcontract: { is: { projectId: filters.projectId } } } : {})
-      },
-      include: {
-        subcontract: {
-          include: {
-            supplier: { select: { nameAr: true } },
-            project: { select: { nameAr: true } }
-          }
-        },
-        payableInvoice: {
-          include: {
-            payments: {
-              include: {
-                payment: {
-                  select: {
-                    id: true,
-                    number: true,
-                    amount: true,
-                    status: true,
-                    date: true
-                  }
-                }
-              }
-            }
-          }
-        }
-      },
-      orderBy: [{ certificateDate: 'desc' }, { id: 'desc' }]
-    })
+      })).include('subcontract', (inc) => inc.include('supplier', (inc2) => inc.select('nameAr')).include('project', (inc2) => inc.select('nameAr'))).include('payableInvoice', (inc) => inc.include('payments', (inc2) => inc.include('payment', (inc2) => inc.select('id', 'number', 'amount', 'status', 'date')))).orderBy([(r) => r.certificateDate.desc(), (r) => r.id.desc()]).all()
   ]);
 
   const relevantIpcs = ipcs.filter((row: any) => !filters.branchId || row.subcontract.branchId === filters.branchId);
@@ -1141,25 +1043,8 @@ async function buildTenderingBundle(filters: DashboardFilters): Promise<SystemDa
   const nextFourteenDays = new Date(today.getTime() + 14 * 24 * 60 * 60 * 1000);
 
   const [tenders, recentTenders] = await Promise.all([
-    prisma.tender.findMany({
-      where: branchFilter,
-      include: {
-        customer: { select: { nameAr: true } },
-        opportunity: { select: { title: true } },
-        estimateLines: true,
-        competitors: true
-      },
-      orderBy: { updatedAt: 'desc' }
-    }),
-    prisma.tender.findMany({
-      where: branchFilter,
-      take: 6,
-      include: {
-        customer: { select: { nameAr: true } },
-        opportunity: { select: { title: true } }
-      },
-      orderBy: { updatedAt: 'desc' }
-    })
+    prisma.orm.public.Tender.where((r) => qw(r, branchFilter)).include('customer', (inc) => inc.select('nameAr')).include('opportunity', (inc) => inc.select('title')).include('estimateLines').include('competitors').orderBy((r) => r.updatedAt.desc()).all(),
+    prisma.orm.public.Tender.where((r) => qw(r, branchFilter)).include('customer', (inc) => inc.select('nameAr')).include('opportunity', (inc) => inc.select('title')).orderBy((r) => r.updatedAt.desc()).limit(6).all()
   ]);
 
   const drafts = tenders.filter((row) => row.status === 'DRAFT');
@@ -1269,58 +1154,44 @@ async function buildSiteOpsBundle(filters: DashboardFilters): Promise<SystemDash
     materialIssuedAgg,
     issueSiteCostAgg
   ] = await Promise.all([
-    prisma.siteDailyLog.count({ where: { ...scopedWhere, logDate: dateRange } }),
-    prisma.siteDailyLog.count({
-      where: {
+    prisma.orm.public.SiteDailyLog.where((r) => qw(r, { ...scopedWhere, logDate: dateRange })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n),
+    prisma.orm.public.SiteDailyLog.where((r) => qw(r, {
         ...scopedWhere,
         logDate: dateRange,
         approvalStatus: 'PENDING'
-      }
-    }),
-    prisma.siteMaterialRequest.count({
-      where: {
+      })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n),
+    prisma.orm.public.SiteMaterialRequest.where((r) => qw(r, {
         ...scopedWhere,
         requestDate: dateRange,
         status: { in: ['DRAFT', 'SUBMITTED', 'APPROVED', 'PARTIAL'] }
-      }
-    }),
-    prisma.siteMaterialRequest.count({
-      where: {
+      })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n),
+    prisma.orm.public.SiteMaterialRequest.where((r) => qw(r, {
         ...scopedWhere,
         requestDate: dateRange,
         approvalStatus: 'PENDING'
-      }
-    }),
-    prisma.siteMaterialRequest.count({
-      where: {
+      })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n),
+    prisma.orm.public.SiteMaterialRequest.where((r) => qw(r, {
         ...scopedWhere,
         status: { in: ['SUBMITTED', 'APPROVED'] },
         requiredBy: { lt: now }
-      }
-    }),
-    prisma.siteIssue.count({
-      where: {
+      })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n),
+    prisma.orm.public.SiteIssue.where((r) => qw(r, {
         ...scopedWhere,
         issueDate: dateRange,
         status: { not: 'RESOLVED' }
-      }
-    }),
-    prisma.siteIssue.count({
-      where: {
+      })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n),
+    prisma.orm.public.SiteIssue.where((r) => qw(r, {
         ...scopedWhere,
         issueDate: dateRange,
         status: { not: 'RESOLVED' },
         severity: { in: ['HIGH', 'CRITICAL'] }
-      }
-    }),
-    prisma.siteAttendance.count({ where: { ...scopedWhere, date: dateRange } }),
-    prisma.siteAttendance.count({
-      where: {
+      })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n),
+    prisma.orm.public.SiteAttendance.where((r) => qw(r, { ...scopedWhere, date: dateRange })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n),
+    prisma.orm.public.SiteAttendance.where((r) => qw(r, {
         ...scopedWhere,
         date: dateRange,
         approvalStatus: { not: 'APPROVED' }
-      }
-    }),
+      })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n),
     prisma.siteProgress.aggregate({
       where: { ...scopedWhere, reportDate: dateRange },
       _avg: {
@@ -1343,40 +1214,12 @@ async function buildSiteOpsBundle(filters: DashboardFilters): Promise<SystemDash
   ]);
 
   const [recentDailyLogs, recentMaterials, recentIssues, progressRows, materialRows, attendanceRows] = await Promise.all([
-    prisma.siteDailyLog.findMany({
-      where: scopedWhere,
-      include: { project: { select: { nameAr: true } } },
-      take: 5,
-      orderBy: [{ logDate: 'desc' }, { id: 'desc' }]
-    }),
-    prisma.siteMaterialRequest.findMany({
-      where: scopedWhere,
-      include: {
-        project: { select: { nameAr: true } },
-        item: { select: { nameAr: true } }
-      },
-      take: 5,
-      orderBy: [{ requestDate: 'desc' }, { id: 'desc' }]
-    }),
-    prisma.siteIssue.findMany({
-      where: scopedWhere,
-      include: { project: { select: { nameAr: true } } },
-      take: 5,
-      orderBy: [{ issueDate: 'desc' }, { id: 'desc' }]
-    }),
-    prisma.siteProgress.findMany({
-      where: { ...scopedWhere, reportDate: dateRange },
-      orderBy: { reportDate: 'asc' },
-      select: { reportDate: true, plannedPercent: true, actualPercent: true }
-    }),
-    prisma.siteMaterialRequest.findMany({
-      where: { ...scopedWhere, requestDate: dateRange },
-      select: { status: true }
-    }),
-    prisma.siteAttendance.findMany({
-      where: { ...scopedWhere, date: dateRange },
-      select: { status: true }
-    })
+    prisma.orm.public.SiteDailyLog.where((r) => qw(r, scopedWhere)).include('project', (inc) => inc.select('nameAr')).orderBy([(r) => r.logDate.desc(), (r) => r.id.desc()]).limit(5).all(),
+    prisma.orm.public.SiteMaterialRequest.where((r) => qw(r, scopedWhere)).include('project', (inc) => inc.select('nameAr')).include('item', (inc) => inc.select('nameAr')).orderBy([(r) => r.requestDate.desc(), (r) => r.id.desc()]).limit(5).all(),
+    prisma.orm.public.SiteIssue.where((r) => qw(r, scopedWhere)).include('project', (inc) => inc.select('nameAr')).orderBy([(r) => r.issueDate.desc(), (r) => r.id.desc()]).limit(5).all(),
+    prisma.orm.public.SiteProgress.where((r) => qw(r, { ...scopedWhere, reportDate: dateRange })).select('reportDate', 'plannedPercent', 'actualPercent').orderBy((r) => r.reportDate.asc()).all(),
+    prisma.orm.public.SiteMaterialRequest.where((r) => qw(r, { ...scopedWhere, requestDate: dateRange })).select('status').all(),
+    prisma.orm.public.SiteAttendance.where((r) => qw(r, { ...scopedWhere, date: dateRange })).select('status').all()
   ]);
 
   const alerts: DashboardAlertItem[] = [];
@@ -1496,59 +1339,24 @@ async function buildPrintingBundle(filters: DashboardFilters): Promise<SystemDas
 
   const [activeTemplates, inactiveTemplates, queuedPrintJobs, failedPrintJobs, queuedExports, failedExports, queuedConversions, failedConversions, auditCount, recentTemplates, recentPrintJobs, recentExportJobs, recentConversionJobs, printStatusRows, exportStatusRows, conversionStatusRows, printFormatRows, exportFormatRows] =
     await Promise.all([
-      prisma.printTemplate.count({ where: { ...branchFilter, status: 'ACTIVE' } }),
-      prisma.printTemplate.count({ where: { ...branchFilter, status: 'INACTIVE' } }),
-      prisma.printJob.count({ where: { ...branchFilter, status: { in: ['QUEUED', 'RUNNING'] } } }),
-      prisma.printJob.count({ where: { ...branchFilter, status: 'FAILED' } }),
-      prisma.exportJob.count({ where: { ...branchFilter, status: { in: ['QUEUED', 'RUNNING'] } } }),
-      prisma.exportJob.count({ where: { ...branchFilter, status: 'FAILED' } }),
-      prisma.conversionJob.count({ where: { ...branchFilter, status: { in: ['QUEUED', 'RUNNING'] } } }),
-      prisma.conversionJob.count({ where: { ...branchFilter, status: 'FAILED' } }),
-      prisma.printAudit.count({ where: { ...branchFilter, createdAt: dateRange } }),
-      prisma.printTemplate.findMany({
-        where: branchFilter,
-        take: 4,
-        orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
-        select: { id: true, key: true, title: true, status: true, defaultFormat: true, updatedAt: true }
-      }),
-      prisma.printJob.findMany({
-        where: { ...branchFilter, requestedAt: dateRange },
-        take: 5,
-        orderBy: [{ requestedAt: 'desc' }, { id: 'desc' }],
-        include: {
-          template: { select: { title: true } }
-        }
-      }),
-      prisma.exportJob.findMany({
-        where: { ...branchFilter, requestedAt: dateRange },
-        take: 4,
-        orderBy: [{ requestedAt: 'desc' }, { id: 'desc' }]
-      }),
-      prisma.conversionJob.findMany({
-        where: { ...branchFilter, requestedAt: dateRange },
-        take: 4,
-        orderBy: [{ requestedAt: 'desc' }, { id: 'desc' }]
-      }),
-      prisma.printJob.findMany({
-        where: { ...branchFilter, requestedAt: dateRange },
-        select: { status: true, requestedAt: true, outputFormat: true }
-      }),
-      prisma.exportJob.findMany({
-        where: { ...branchFilter, requestedAt: dateRange },
-        select: { status: true, requestedAt: true, outputFormat: true }
-      }),
-      prisma.conversionJob.findMany({
-        where: { ...branchFilter, requestedAt: dateRange },
-        select: { status: true, requestedAt: true, sourceFormat: true, targetFormat: true }
-      }),
-      prisma.printJob.findMany({
-        where: { ...branchFilter, requestedAt: dateRange },
-        select: { outputFormat: true, requestedAt: true }
-      }),
-      prisma.exportJob.findMany({
-        where: { ...branchFilter, requestedAt: dateRange },
-        select: { outputFormat: true, requestedAt: true }
-      })
+      prisma.orm.public.PrintTemplate.where((r) => qw(r, { ...branchFilter, status: 'ACTIVE' })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n),
+      prisma.orm.public.PrintTemplate.where((r) => qw(r, { ...branchFilter, status: 'INACTIVE' })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n),
+      prisma.orm.public.PrintJob.where((r) => qw(r, { ...branchFilter, status: { in: ['QUEUED', 'RUNNING'] } })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n),
+      prisma.orm.public.PrintJob.where((r) => qw(r, { ...branchFilter, status: 'FAILED' })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n),
+      prisma.orm.public.ExportJob.where((r) => qw(r, { ...branchFilter, status: { in: ['QUEUED', 'RUNNING'] } })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n),
+      prisma.orm.public.ExportJob.where((r) => qw(r, { ...branchFilter, status: 'FAILED' })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n),
+      prisma.orm.public.ConversionJob.where((r) => qw(r, { ...branchFilter, status: { in: ['QUEUED', 'RUNNING'] } })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n),
+      prisma.orm.public.ConversionJob.where((r) => qw(r, { ...branchFilter, status: 'FAILED' })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n),
+      prisma.orm.public.PrintAudit.where((r) => qw(r, { ...branchFilter, createdAt: dateRange })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n),
+      prisma.orm.public.PrintTemplate.where((r) => qw(r, branchFilter)).select('id', 'key', 'title', 'status', 'defaultFormat', 'updatedAt').orderBy([(r) => r.updatedAt.desc(), (r) => r.id.desc()]).limit(4).all(),
+      prisma.orm.public.PrintJob.where((r) => qw(r, { ...branchFilter, requestedAt: dateRange })).include('template', (inc) => inc.select('title')).orderBy([(r) => r.requestedAt.desc(), (r) => r.id.desc()]).limit(5).all(),
+      prisma.orm.public.ExportJob.where((r) => qw(r, { ...branchFilter, requestedAt: dateRange })).orderBy([(r) => r.requestedAt.desc(), (r) => r.id.desc()]).limit(4).all(),
+      prisma.orm.public.ConversionJob.where((r) => qw(r, { ...branchFilter, requestedAt: dateRange })).orderBy([(r) => r.requestedAt.desc(), (r) => r.id.desc()]).limit(4).all(),
+      prisma.orm.public.PrintJob.where((r) => qw(r, { ...branchFilter, requestedAt: dateRange })).select('status', 'requestedAt', 'outputFormat').all(),
+      prisma.orm.public.ExportJob.where((r) => qw(r, { ...branchFilter, requestedAt: dateRange })).select('status', 'requestedAt', 'outputFormat').all(),
+      prisma.orm.public.ConversionJob.where((r) => qw(r, { ...branchFilter, requestedAt: dateRange })).select('status', 'requestedAt', 'sourceFormat', 'targetFormat').all(),
+      prisma.orm.public.PrintJob.where((r) => qw(r, { ...branchFilter, requestedAt: dateRange })).select('outputFormat', 'requestedAt').all(),
+      prisma.orm.public.ExportJob.where((r) => qw(r, { ...branchFilter, requestedAt: dateRange })).select('outputFormat', 'requestedAt').all()
     ]);
 
   const alerts: DashboardAlertItem[] = [];
@@ -1688,34 +1496,11 @@ async function buildBudgetingBundle(filters: DashboardFilters): Promise<SystemDa
   if (filters.projectId) varianceWhere.projectId = filters.projectId;
 
   const [scenarios, versions, allocations, forecasts, variances] = await Promise.all([
-    prisma.budgetScenario.findMany({
-      where: scenarioWhere,
-      orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
-      take: 6
-    }),
-    prisma.budgetVersion.findMany({
-      where: versionWhere,
-      include: {
-        scenario: { select: { id: true, code: true, nameAr: true, branchId: true } }
-      },
-      orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
-      take: 20
-    }),
-    prisma.budgetAllocation.findMany({
-      where: allocationWhere,
-      orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
-      take: 200
-    }),
-    prisma.forecastSnapshot.findMany({
-      where: forecastWhere,
-      orderBy: [{ snapshotDate: 'desc' }, { id: 'desc' }],
-      take: 12
-    }),
-    prisma.varianceEntry.findMany({
-      where: varianceWhere,
-      orderBy: [{ detectedAt: 'desc' }, { id: 'desc' }],
-      take: 100
-    })
+    prisma.orm.public.BudgetScenario.where((r) => qw(r, scenarioWhere)).orderBy([(r) => r.updatedAt.desc(), (r) => r.id.desc()]).limit(6).all(),
+    prisma.orm.public.BudgetVersion.where((r) => qw(r, versionWhere)).include('scenario', (inc) => inc.select('id', 'code', 'nameAr', 'branchId')).orderBy([(r) => r.updatedAt.desc(), (r) => r.id.desc()]).limit(20).all(),
+    prisma.orm.public.BudgetAllocation.where((r) => qw(r, allocationWhere)).orderBy([(r) => r.updatedAt.desc(), (r) => r.id.desc()]).limit(200).all(),
+    prisma.orm.public.ForecastSnapshot.where((r) => qw(r, forecastWhere)).orderBy([(r) => r.snapshotDate.desc(), (r) => r.id.desc()]).limit(12).all(),
+    prisma.orm.public.VarianceEntry.where((r) => qw(r, varianceWhere)).orderBy([(r) => r.detectedAt.desc(), (r) => r.id.desc()]).limit(100).all()
   ]);
 
   const publishedVersions = versions.filter((row) => row.status === 'PUBLISHED');
@@ -1860,20 +1645,20 @@ async function buildQualityBundle(filters: DashboardFilters): Promise<SystemDash
 
   const [inspectionCount, pendingInspections, approvedInspections, openNcr, openIncidents, criticalIncidents, pendingPermits, expiringPermits, recentInspections, recentNcr, recentIncidents, recentPermits, inspectionRows, incidentRows] =
     await Promise.all([
-      prisma.inspection.count({ where: scopedWhere }),
-      prisma.inspection.count({ where: { ...scopedWhere, approvalStatus: 'PENDING' } }),
-      prisma.inspection.count({ where: { ...scopedWhere, approvalStatus: 'APPROVED' } }),
-      prisma.ncrReport.count({ where: { ...scopedWhere, status: 'OPEN' } }),
-      prisma.safetyIncident.count({ where: { ...scopedWhere, status: 'OPEN' } }),
-      prisma.safetyIncident.count({ where: { ...scopedWhere, status: 'OPEN', severity: { in: ['HIGH', 'CRITICAL'] } } }),
-      prisma.permitToWork.count({ where: { ...scopedWhere, approvalStatus: 'PENDING' } }),
-      prisma.permitToWork.count({ where: { ...scopedWhere, validTo: { gte: new Date(), lte: soon }, status: { not: 'EXPIRED' } } }),
-      prisma.inspection.findMany({ where: { ...scopedWhere, inspectionDate: dateRange }, take: 5, orderBy: [{ inspectionDate: 'desc' }, { id: 'desc' }] }),
-      prisma.ncrReport.findMany({ where: { ...scopedWhere, reportDate: dateRange }, take: 4, orderBy: [{ reportDate: 'desc' }, { id: 'desc' }] }),
-      prisma.safetyIncident.findMany({ where: { ...scopedWhere, incidentDate: dateRange }, take: 4, orderBy: [{ incidentDate: 'desc' }, { id: 'desc' }] }),
-      prisma.permitToWork.findMany({ where: { ...scopedWhere, validTo: dateRange }, take: 4, orderBy: [{ validTo: 'asc' }, { id: 'desc' }] }),
-      prisma.inspection.findMany({ where: { ...scopedWhere, inspectionDate: dateRange }, select: { inspectionDate: true, result: true } }),
-      prisma.safetyIncident.findMany({ where: { ...scopedWhere, incidentDate: dateRange }, select: { incidentDate: true, severity: true } })
+      prisma.orm.public.Inspection.where((r) => qw(r, scopedWhere)).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n),
+      prisma.orm.public.Inspection.where((r) => qw(r, { ...scopedWhere, approvalStatus: 'PENDING' })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n),
+      prisma.orm.public.Inspection.where((r) => qw(r, { ...scopedWhere, approvalStatus: 'APPROVED' })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n),
+      prisma.orm.public.NcrReport.where((r) => qw(r, { ...scopedWhere, status: 'OPEN' })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n),
+      prisma.orm.public.SafetyIncident.where((r) => qw(r, { ...scopedWhere, status: 'OPEN' })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n),
+      prisma.orm.public.SafetyIncident.where((r) => qw(r, { ...scopedWhere, status: 'OPEN', severity: { in: ['HIGH', 'CRITICAL'] } })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n),
+      prisma.orm.public.PermitToWork.where((r) => qw(r, { ...scopedWhere, approvalStatus: 'PENDING' })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n),
+      prisma.orm.public.PermitToWork.where((r) => qw(r, { ...scopedWhere, validTo: { gte: new Date(), lte: soon }, status: { not: 'EXPIRED' } })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n),
+      prisma.orm.public.Inspection.where((r) => qw(r, { ...scopedWhere, inspectionDate: dateRange })).orderBy([(r) => r.inspectionDate.desc(), (r) => r.id.desc()]).limit(5).all(),
+      prisma.orm.public.NcrReport.where((r) => qw(r, { ...scopedWhere, reportDate: dateRange })).orderBy([(r) => r.reportDate.desc(), (r) => r.id.desc()]).limit(4).all(),
+      prisma.orm.public.SafetyIncident.where((r) => qw(r, { ...scopedWhere, incidentDate: dateRange })).orderBy([(r) => r.incidentDate.desc(), (r) => r.id.desc()]).limit(4).all(),
+      prisma.orm.public.PermitToWork.where((r) => qw(r, { ...scopedWhere, validTo: dateRange })).orderBy([(r) => r.validTo.asc(), (r) => r.id.desc()]).limit(4).all(),
+      prisma.orm.public.Inspection.where((r) => qw(r, { ...scopedWhere, inspectionDate: dateRange })).select('inspectionDate', 'result').all(),
+      prisma.orm.public.SafetyIncident.where((r) => qw(r, { ...scopedWhere, incidentDate: dateRange })).select('incidentDate', 'severity').all()
     ]);
 
   const inspectionResultSeries = Array.from(
@@ -1997,22 +1782,22 @@ async function buildMaintenanceBundle(filters: DashboardFilters): Promise<System
 
   const [activePlans, preventiveDue, openOrders, pendingOrders, overdueOrders, executionsCount, reservedSpare, repeatFailures, criticalFailures, recentPlans, recentOrders, recentExecutions, recentFailures, executionRows, failureRows, orderRows] =
     await Promise.all([
-      prisma.maintenancePlan.count({ where: { ...scopedWhere, status: 'ACTIVE' } }),
-      prisma.maintenancePlan.count({ where: { ...scopedWhere, status: 'ACTIVE', nextDueDate: { gte: now, lte: soon } } }),
-      prisma.maintenanceOrder.count({ where: { ...scopedWhere, status: { notIn: ['COMPLETED', 'CANCELLED'] } } }),
-      prisma.maintenanceOrder.count({ where: { ...scopedWhere, approvalStatus: 'PENDING' } }),
-      prisma.maintenanceOrder.count({ where: { ...scopedWhere, status: { notIn: ['COMPLETED', 'CANCELLED'] }, dueDate: { lt: now } } }),
-      prisma.maintenanceExecution.count({ where: { ...scopedWhere, executionDate: dateRange } }),
-      prisma.spareReservation.count({ where: { ...(filters.branchId ? { branchId: filters.branchId } : {}), status: 'RESERVED' } }),
-      prisma.failureAnalysis.count({ where: { ...scopedWhere, repeatCount: { gt: 0 }, status: 'OPEN' } }),
-      prisma.failureAnalysis.count({ where: { ...scopedWhere, status: 'OPEN', severity: { in: ['HIGH', 'CRITICAL'] } } }),
-      prisma.maintenancePlan.findMany({ where: scopedWhere, take: 4, orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }] }),
-      prisma.maintenanceOrder.findMany({ where: { ...scopedWhere, dueDate: dateRange }, take: 5, orderBy: [{ dueDate: 'asc' }, { id: 'desc' }] }),
-      prisma.maintenanceExecution.findMany({ where: { ...scopedWhere, executionDate: dateRange }, take: 5, orderBy: [{ executionDate: 'desc' }, { id: 'desc' }] }),
-      prisma.failureAnalysis.findMany({ where: { ...scopedWhere, incidentDate: dateRange }, take: 5, orderBy: [{ incidentDate: 'desc' }, { id: 'desc' }] }),
-      prisma.maintenanceExecution.findMany({ where: { ...scopedWhere, executionDate: dateRange }, select: { executionDate: true, laborCost: true, spareCost: true } }),
-      prisma.failureAnalysis.findMany({ where: { ...scopedWhere, incidentDate: dateRange }, select: { severity: true, mtbfHours: true, incidentDate: true } }),
-      prisma.maintenanceOrder.findMany({ where: { ...scopedWhere, dueDate: dateRange }, select: { priority: true, actualCost: true, dueDate: true } })
+      prisma.orm.public.MaintenancePlan.where((r) => qw(r, { ...scopedWhere, status: 'ACTIVE' })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n),
+      prisma.orm.public.MaintenancePlan.where((r) => qw(r, { ...scopedWhere, status: 'ACTIVE', nextDueDate: { gte: now, lte: soon } })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n),
+      prisma.orm.public.MaintenanceOrder.where((r) => qw(r, { ...scopedWhere, status: { notIn: ['COMPLETED', 'CANCELLED'] } })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n),
+      prisma.orm.public.MaintenanceOrder.where((r) => qw(r, { ...scopedWhere, approvalStatus: 'PENDING' })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n),
+      prisma.orm.public.MaintenanceOrder.where((r) => qw(r, { ...scopedWhere, status: { notIn: ['COMPLETED', 'CANCELLED'] }, dueDate: { lt: now } })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n),
+      prisma.orm.public.MaintenanceExecution.where((r) => qw(r, { ...scopedWhere, executionDate: dateRange })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n),
+      prisma.orm.public.SpareReservation.where((r) => qw(r, { ...(filters.branchId ? { branchId: filters.branchId } : {}), status: 'RESERVED' })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n),
+      prisma.orm.public.FailureAnalysis.where((r) => qw(r, { ...scopedWhere, repeatCount: { gt: 0 }, status: 'OPEN' })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n),
+      prisma.orm.public.FailureAnalysis.where((r) => qw(r, { ...scopedWhere, status: 'OPEN', severity: { in: ['HIGH', 'CRITICAL'] } })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n),
+      prisma.orm.public.MaintenancePlan.where((r) => qw(r, scopedWhere)).orderBy([(r) => r.updatedAt.desc(), (r) => r.id.desc()]).limit(4).all(),
+      prisma.orm.public.MaintenanceOrder.where((r) => qw(r, { ...scopedWhere, dueDate: dateRange })).orderBy([(r) => r.dueDate.asc(), (r) => r.id.desc()]).limit(5).all(),
+      prisma.orm.public.MaintenanceExecution.where((r) => qw(r, { ...scopedWhere, executionDate: dateRange })).orderBy([(r) => r.executionDate.desc(), (r) => r.id.desc()]).limit(5).all(),
+      prisma.orm.public.FailureAnalysis.where((r) => qw(r, { ...scopedWhere, incidentDate: dateRange })).orderBy([(r) => r.incidentDate.desc(), (r) => r.id.desc()]).limit(5).all(),
+      prisma.orm.public.MaintenanceExecution.where((r) => qw(r, { ...scopedWhere, executionDate: dateRange })).select('executionDate', 'laborCost', 'spareCost').all(),
+      prisma.orm.public.FailureAnalysis.where((r) => qw(r, { ...scopedWhere, incidentDate: dateRange })).select('severity', 'mtbfHours', 'incidentDate').all(),
+      prisma.orm.public.MaintenanceOrder.where((r) => qw(r, { ...scopedWhere, dueDate: dateRange })).select('priority', 'actualCost', 'dueDate').all()
     ]);
 
   const operatingCost = round(orderRows.reduce((sum, row) => sum + toNumber(row.actualCost), 0));
@@ -2124,17 +1909,17 @@ async function buildRiskBundle(filters: DashboardFilters): Promise<SystemDashboa
 
   const [openRisks, highRisks, projectLinkedRisks, dueSoonRisks, overdueMitigations, followupsDue, recentRisks, recentAssessments, recentMitigations, recentFollowups, riskRows] =
     await Promise.all([
-      prisma.riskRegister.count({ where: { ...scopedWhere, status: 'OPEN' } }),
-      prisma.riskRegister.count({ where: { ...scopedWhere, status: 'OPEN', severity: { in: ['HIGH', 'CRITICAL'] } } }),
-      prisma.riskRegister.count({ where: { ...scopedWhere, projectId: { not: null } } }),
-      prisma.riskRegister.count({ where: { ...scopedWhere, dueDate: { gte: now, lte: new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000) } } }),
-      prisma.mitigationPlan.count({ where: { dueDate: { lt: now }, status: { notIn: ['CLOSED', 'COMPLETED'] }, risk: { ...(filters.branchId ? { branchId: filters.branchId } : {}), ...(filters.projectId ? { projectId: filters.projectId } : {}) } } }),
-      prisma.riskFollowup.count({ where: { nextReviewDate: { lt: now }, risk: { ...(filters.branchId ? { branchId: filters.branchId } : {}), ...(filters.projectId ? { projectId: filters.projectId } : {}) } } }),
-      prisma.riskRegister.findMany({ where: scopedWhere, take: 5, orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }] }),
-      prisma.riskAssessment.findMany({ where: { assessmentDate: dateRange, risk: { ...(filters.branchId ? { branchId: filters.branchId } : {}), ...(filters.projectId ? { projectId: filters.projectId } : {}) } }, take: 4, orderBy: [{ assessmentDate: 'desc' }, { id: 'desc' }] }),
-      prisma.mitigationPlan.findMany({ where: { dueDate: dateRange, risk: { ...(filters.branchId ? { branchId: filters.branchId } : {}), ...(filters.projectId ? { projectId: filters.projectId } : {}) } }, take: 4, orderBy: [{ dueDate: 'asc' }, { id: 'desc' }] }),
-      prisma.riskFollowup.findMany({ where: { followupDate: dateRange, risk: { ...(filters.branchId ? { branchId: filters.branchId } : {}), ...(filters.projectId ? { projectId: filters.projectId } : {}) } }, take: 4, orderBy: [{ followupDate: 'desc' }, { id: 'desc' }] }),
-      prisma.riskRegister.findMany({ where: scopedWhere, select: { severity: true, category: true, exposure: true, createdAt: true } })
+      prisma.orm.public.RiskRegister.where((r) => qw(r, { ...scopedWhere, status: 'OPEN' })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n),
+      prisma.orm.public.RiskRegister.where((r) => qw(r, { ...scopedWhere, status: 'OPEN', severity: { in: ['HIGH', 'CRITICAL'] } })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n),
+      prisma.orm.public.RiskRegister.where((r) => qw(r, { ...scopedWhere, projectId: { not: null } })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n),
+      prisma.orm.public.RiskRegister.where((r) => qw(r, { ...scopedWhere, dueDate: { gte: now, lte: new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000) } })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n),
+      prisma.orm.public.MitigationPlan.where((r) => qw(r, { dueDate: { lt: now }, status: { notIn: ['CLOSED', 'COMPLETED'] }, risk: { ...(filters.branchId ? { branchId: filters.branchId } : {}), ...(filters.projectId ? { projectId: filters.projectId } : {}) } })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n),
+      prisma.orm.public.RiskFollowup.where((r) => qw(r, { nextReviewDate: { lt: now }, risk: { ...(filters.branchId ? { branchId: filters.branchId } : {}), ...(filters.projectId ? { projectId: filters.projectId } : {}) } })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n),
+      prisma.orm.public.RiskRegister.where((r) => qw(r, scopedWhere)).orderBy([(r) => r.updatedAt.desc(), (r) => r.id.desc()]).limit(5).all(),
+      prisma.orm.public.RiskAssessment.where((r) => qw(r, { assessmentDate: dateRange, risk: { ...(filters.branchId ? { branchId: filters.branchId } : {}), ...(filters.projectId ? { projectId: filters.projectId } : {}) } })).orderBy([(r) => r.assessmentDate.desc(), (r) => r.id.desc()]).limit(4).all(),
+      prisma.orm.public.MitigationPlan.where((r) => qw(r, { dueDate: dateRange, risk: { ...(filters.branchId ? { branchId: filters.branchId } : {}), ...(filters.projectId ? { projectId: filters.projectId } : {}) } })).orderBy([(r) => r.dueDate.asc(), (r) => r.id.desc()]).limit(4).all(),
+      prisma.orm.public.RiskFollowup.where((r) => qw(r, { followupDate: dateRange, risk: { ...(filters.branchId ? { branchId: filters.branchId } : {}), ...(filters.projectId ? { projectId: filters.projectId } : {}) } })).orderBy([(r) => r.followupDate.desc(), (r) => r.id.desc()]).limit(4).all(),
+      prisma.orm.public.RiskRegister.where((r) => qw(r, scopedWhere)).select('severity', 'category', 'exposure', 'createdAt').all()
     ]);
 
   const severitySeries = Array.from(
@@ -2254,19 +2039,19 @@ async function buildSchedulingBundle(filters: DashboardFilters): Promise<SystemD
 
   const [plansCount, openTasks, criticalTasks, delayedTasks, delayedCriticalTasks, dependenciesCount, snapshotsCount, resourceOverload, recentPlans, recentTasks, recentDependencies, recentSnapshots, taskRows] =
     await Promise.all([
-      prisma.schedulePlan.count({ where: scopedWhere }),
-      prisma.scheduleTask.count({ where: { ...scopedWhere, status: { notIn: ['DONE', 'COMPLETED', 'CLOSED'] } } }),
-      prisma.scheduleTask.count({ where: { ...scopedWhere, isCritical: true } }),
-      prisma.scheduleTask.count({ where: { ...scopedWhere, endDate: { lt: now }, progressPercent: { lt: 100 } } }),
-      prisma.scheduleTask.count({ where: { ...scopedWhere, isCritical: true, endDate: { lt: now }, progressPercent: { lt: 100 } } }),
-      prisma.taskDependency.count({ where: { ...(filters.projectId ? { plan: { is: { projectId: filters.projectId } } } : {}), ...(filters.branchId ? { plan: { is: { branchId: filters.branchId } } } : {}) } }),
-      prisma.criticalPathSnapshot.count({ where: { ...(filters.projectId ? { plan: { is: { projectId: filters.projectId } } } : {}), ...(filters.branchId ? { plan: { is: { branchId: filters.branchId } } } : {}) } }),
-      prisma.resourceAssignment.count({ where: { plan: { ...(filters.projectId ? { projectId: filters.projectId } : {}), ...(filters.branchId ? { branchId: filters.branchId } : {}) }, allocationPercent: { gt: 100 } } }),
-      prisma.schedulePlan.findMany({ where: scopedWhere, take: 4, orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }] }),
-      prisma.scheduleTask.findMany({ where: { ...scopedWhere, startDate: dateRange }, take: 6, orderBy: [{ startDate: 'asc' }, { id: 'asc' }] }),
-      prisma.taskDependency.findMany({ where: { ...(filters.projectId ? { plan: { is: { projectId: filters.projectId } } } : {}), ...(filters.branchId ? { plan: { is: { branchId: filters.branchId } } } : {}) }, take: 4, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }] }),
-      prisma.criticalPathSnapshot.findMany({ where: { ...(filters.projectId ? { plan: { is: { projectId: filters.projectId } } } : {}), ...(filters.branchId ? { plan: { is: { branchId: filters.branchId } } } : {}) }, take: 4, orderBy: [{ snapshotDate: 'desc' }, { id: 'desc' }] }),
-      prisma.scheduleTask.findMany({ where: { ...scopedWhere, startDate: dateRange }, select: { progressPercent: true, isCritical: true, endDate: true, startDate: true } })
+      prisma.orm.public.SchedulePlan.where((r) => qw(r, scopedWhere)).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n),
+      prisma.orm.public.ScheduleTask.where((r) => qw(r, { ...scopedWhere, status: { notIn: ['DONE', 'COMPLETED', 'CLOSED'] } })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n),
+      prisma.orm.public.ScheduleTask.where((r) => qw(r, { ...scopedWhere, isCritical: true })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n),
+      prisma.orm.public.ScheduleTask.where((r) => qw(r, { ...scopedWhere, endDate: { lt: now }, progressPercent: { lt: 100 } })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n),
+      prisma.orm.public.ScheduleTask.where((r) => qw(r, { ...scopedWhere, isCritical: true, endDate: { lt: now }, progressPercent: { lt: 100 } })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n),
+      prisma.orm.public.TaskDependency.where((r) => qw(r, { ...(filters.projectId ? { plan: { is: { projectId: filters.projectId } } } : {}), ...(filters.branchId ? { plan: { is: { branchId: filters.branchId } } } : {}) })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n),
+      prisma.orm.public.CriticalPathSnapshot.where((r) => qw(r, { ...(filters.projectId ? { plan: { is: { projectId: filters.projectId } } } : {}), ...(filters.branchId ? { plan: { is: { branchId: filters.branchId } } } : {}) })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n),
+      prisma.orm.public.ResourceAssignment.where((r) => qw(r, { plan: { ...(filters.projectId ? { projectId: filters.projectId } : {}), ...(filters.branchId ? { branchId: filters.branchId } : {}) }, allocationPercent: { gt: 100 } })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n),
+      prisma.orm.public.SchedulePlan.where((r) => qw(r, scopedWhere)).orderBy([(r) => r.updatedAt.desc(), (r) => r.id.desc()]).limit(4).all(),
+      prisma.orm.public.ScheduleTask.where((r) => qw(r, { ...scopedWhere, startDate: dateRange })).orderBy([(r) => r.startDate.asc(), (r) => r.id.asc()]).limit(6).all(),
+      prisma.orm.public.TaskDependency.where((r) => qw(r, { ...(filters.projectId ? { plan: { is: { projectId: filters.projectId } } } : {}), ...(filters.branchId ? { plan: { is: { branchId: filters.branchId } } } : {}) })).orderBy([(r) => r.createdAt.desc(), (r) => r.id.desc()]).limit(4).all(),
+      prisma.orm.public.CriticalPathSnapshot.where((r) => qw(r, { ...(filters.projectId ? { plan: { is: { projectId: filters.projectId } } } : {}), ...(filters.branchId ? { plan: { is: { branchId: filters.branchId } } } : {}) })).orderBy([(r) => r.snapshotDate.desc(), (r) => r.id.desc()]).limit(4).all(),
+      prisma.orm.public.ScheduleTask.where((r) => qw(r, { ...scopedWhere, startDate: dateRange })).select('progressPercent', 'isCritical', 'endDate', 'startDate').all()
     ]);
 
   const progressSeries = [
@@ -2367,11 +2152,11 @@ async function buildSchedulingBundle(filters: DashboardFilters): Promise<SystemD
 async function buildAnalyticsBundle(filters: DashboardFilters): Promise<SystemDashboardBundle> {
   const branchFilter = filters.branchId ? { branchId: filters.branchId } : {};
   const [invoices, customers, items, payments, journals] = await Promise.all([
-    prisma.invoice.findMany({ where: { ...branchFilter, date: { gte: filters.dateFrom, lte: filters.dateTo } }, orderBy: { date: 'asc' } }),
-    prisma.customer.findMany({ where: branchFilter, orderBy: { currentBalance: 'desc' }, take: 6 }),
-    prisma.item.findMany({ orderBy: { inventoryValue: 'desc' }, take: 6 }),
-    prisma.payment.count({ where: { ...branchFilter, date: { gte: filters.dateFrom, lte: filters.dateTo } } }),
-    prisma.journalEntry.count({ where: { date: { gte: filters.dateFrom, lte: filters.dateTo } } })
+    prisma.orm.public.Invoice.where((r) => qw(r, { ...branchFilter, date: { gte: filters.dateFrom, lte: filters.dateTo } })).orderBy((r) => r.date.asc()).all(),
+    prisma.orm.public.Customer.where((r) => qw(r, branchFilter)).orderBy((r) => r.currentBalance.desc()).limit(6).all(),
+    prisma.orm.public.Item.orderBy((r) => r.inventoryValue.desc()).limit(6).all(),
+    prisma.orm.public.Payment.where((r) => qw(r, { ...branchFilter, date: { gte: filters.dateFrom, lte: filters.dateTo } })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n),
+    prisma.orm.public.JournalEntry.where((r) => qw(r, { date: { gte: filters.dateFrom, lte: filters.dateTo } })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n)
   ]);
 
   const salesInvoices = invoices.filter((row) => row.type === 'SALES');
@@ -2433,106 +2218,84 @@ async function buildControlCenterBundle(filters: DashboardFilters): Promise<Syst
   const branchFilter = filters.branchId ? { branchId: filters.branchId } : {};
   const [quotesPending, invoicesPending, paymentsPending, contractsPending, purchaseOrdersPending, tendersPending, subcontractIpcsPending, budgetingPendingApprovals, budgetingCriticalVariances, qualityPendingApprovals, qualityCriticalAlerts, maintenancePendingOrders, maintenanceCriticalAlerts, riskCriticalAlerts, riskOverdueMitigations, schedulingCriticalDelays, openTasks, unreadNotifications, failedOutbox, recentOutbox, recentTasks, recentAudits, lowStockItems, overdueInvoices, overBudgetProjects] =
     await Promise.all([
-      prisma.salesQuote.count({ where: { ...branchFilter, approvalStatus: 'PENDING' } }),
-      prisma.invoice.count({ where: { ...branchFilter, approvalStatus: 'PENDING' } }),
-      prisma.payment.count({ where: { ...branchFilter, approvalStatus: 'PENDING' } }),
-      prisma.contract.count({ where: { ...branchFilter, approvalStatus: 'PENDING' } }),
-      prisma.purchaseOrder.count({ where: { ...branchFilter, approvalStatus: 'PENDING' } }),
-      prisma.tender.count({ where: { ...branchFilter, approvalStatus: 'PENDING' } }),
-      prisma.subcontractIpc.count({
-        where: {
+      prisma.orm.public.SalesQuote.where((r) => qw(r, { ...branchFilter, approvalStatus: 'PENDING' })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n),
+      prisma.orm.public.Invoice.where((r) => qw(r, { ...branchFilter, approvalStatus: 'PENDING' })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n),
+      prisma.orm.public.Payment.where((r) => qw(r, { ...branchFilter, approvalStatus: 'PENDING' })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n),
+      prisma.orm.public.Contract.where((r) => qw(r, { ...branchFilter, approvalStatus: 'PENDING' })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n),
+      prisma.orm.public.PurchaseOrder.where((r) => qw(r, { ...branchFilter, approvalStatus: 'PENDING' })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n),
+      prisma.orm.public.Tender.where((r) => qw(r, { ...branchFilter, approvalStatus: 'PENDING' })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n),
+      prisma.orm.public.SubcontractIpc.where((r) => qw(r, {
           approvalStatus: 'PENDING',
           ...(filters.branchId ? { subcontract: { is: { branchId: filters.branchId } } } : {})
-        }
-      }),
-      prisma.budgetScenario.count({
-        where: {
+        })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n),
+      prisma.orm.public.BudgetScenario.where((r) => qw(r, {
           approvalStatus: 'PENDING',
           ...(filters.branchId ? { branchId: filters.branchId } : {})
-        }
-      }),
-      prisma.varianceEntry.count({
-        where: {
+        })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n),
+      prisma.orm.public.VarianceEntry.where((r) => qw(r, {
           ...(filters.branchId ? { branchId: filters.branchId } : {}),
           ...(filters.projectId ? { projectId: filters.projectId } : {}),
           status: { not: 'RESOLVED' },
           severity: { in: ['HIGH', 'CRITICAL'] }
-        }
-      }),
-      prisma.inspection.count({
-        where: {
+        })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n),
+      prisma.orm.public.Inspection.where((r) => qw(r, {
           ...(filters.branchId ? { branchId: filters.branchId } : {}),
           ...(filters.projectId ? { projectId: filters.projectId } : {}),
           approvalStatus: 'PENDING'
-        }
-      }),
-      prisma.safetyIncident.count({
-        where: {
+        })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n),
+      prisma.orm.public.SafetyIncident.where((r) => qw(r, {
           ...(filters.branchId ? { branchId: filters.branchId } : {}),
           ...(filters.projectId ? { projectId: filters.projectId } : {}),
           status: 'OPEN',
           severity: { in: ['HIGH', 'CRITICAL'] }
-        }
-      }),
-      prisma.maintenanceOrder.count({
-        where: {
+        })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n),
+      prisma.orm.public.MaintenanceOrder.where((r) => qw(r, {
           ...(filters.branchId ? { branchId: filters.branchId } : {}),
           ...(filters.projectId ? { projectId: filters.projectId } : {}),
           approvalStatus: 'PENDING'
-        }
-      }),
-      prisma.failureAnalysis.count({
-        where: {
+        })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n),
+      prisma.orm.public.FailureAnalysis.where((r) => qw(r, {
           ...(filters.branchId ? { branchId: filters.branchId } : {}),
           ...(filters.projectId ? { projectId: filters.projectId } : {}),
           status: 'OPEN',
           severity: { in: ['HIGH', 'CRITICAL'] }
-        }
-      }),
-      prisma.riskRegister.count({
-        where: {
+        })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n),
+      prisma.orm.public.RiskRegister.where((r) => qw(r, {
           ...(filters.branchId ? { branchId: filters.branchId } : {}),
           ...(filters.projectId ? { projectId: filters.projectId } : {}),
           status: 'OPEN',
           severity: { in: ['HIGH', 'CRITICAL'] }
-        }
-      }),
-      prisma.mitigationPlan.count({
-        where: {
+        })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n),
+      prisma.orm.public.MitigationPlan.where((r) => qw(r, {
           dueDate: { lt: new Date() },
           status: { notIn: ['CLOSED', 'COMPLETED'] },
           risk: {
             ...(filters.branchId ? { branchId: filters.branchId } : {}),
             ...(filters.projectId ? { projectId: filters.projectId } : {})
           }
-        }
-      }),
-      prisma.scheduleTask.count({
-        where: {
+        })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n),
+      prisma.orm.public.ScheduleTask.where((r) => qw(r, {
           ...(filters.branchId ? { branchId: filters.branchId } : {}),
           ...(filters.projectId ? { projectId: filters.projectId } : {}),
           isCritical: true,
           endDate: { lt: new Date() },
           progressPercent: { lt: 100 }
-        }
-      }),
-      prisma.userTask.count({ where: { status: { notIn: ['DONE', 'CLOSED', 'COMPLETED'] } } }),
-      prisma.notification.count({ where: { isRead: false } }),
-      prisma.outboxEvent.count({ where: { ...branchFilter, status: 'FAILED' } }),
-      prisma.outboxEvent.findMany({ where: branchFilter, take: 6, orderBy: { occurredAt: 'desc' } }),
-      prisma.userTask.findMany({ take: 5, orderBy: { updatedAt: 'desc' } }),
-      prisma.auditLog.findMany({ take: 5, orderBy: { createdAt: 'desc' } }),
-      prisma.item.findMany({ orderBy: { updatedAt: 'desc' } }),
-      prisma.invoice.count({
-        where: {
+        })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n),
+      prisma.orm.public.UserTask.where((r) => qw(r, { status: { notIn: ['DONE', 'CLOSED', 'COMPLETED'] } })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n),
+      prisma.orm.public.Notification.where((r) => qw(r, { isRead: false })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n),
+      prisma.orm.public.OutboxEvent.where((r) => qw(r, { ...branchFilter, status: 'FAILED' })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n),
+      prisma.orm.public.OutboxEvent.where((r) => qw(r, branchFilter)).orderBy((r) => r.occurredAt.desc()).limit(6).all(),
+      prisma.orm.public.UserTask.orderBy((r) => r.updatedAt.desc()).limit(5).all(),
+      prisma.orm.public.AuditLog.orderBy((r) => r.createdAt.desc()).limit(5).all(),
+      prisma.orm.public.Item.orderBy((r) => r.updatedAt.desc()).all(),
+      prisma.orm.public.Invoice.where((r) => qw(r, {
           ...branchFilter,
           type: 'SALES',
           dueDate: { lt: new Date() },
           outstanding: { gt: 0 },
           status: { in: ['ISSUED', 'PARTIAL'] }
-        }
-      }),
-      prisma.project.findMany({ where: branchFilter })
+        })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n),
+      prisma.orm.public.Project.where((r) => qw(r, branchFilter)).all()
     ]);
 
   const pendingApprovals =
@@ -2562,18 +2325,10 @@ async function buildControlCenterBundle(filters: DashboardFilters): Promise<Syst
   const systemHealth = Math.max(0, 100 - failedOutbox * 5 - overdueInvoices * 2 - budgetingCriticalVariances - riskCriticalAlerts - schedulingCriticalDelays);
 
   const [salesTrendRows, expenseTrendRows, outboxPending, outboxPublished] = await Promise.all([
-    prisma.invoice.findMany({
-      where: { ...branchFilter, type: 'SALES', status: { in: ['ISSUED', 'PAID', 'PARTIAL'] }, date: { gte: filters.dateFrom, lte: filters.dateTo } },
-      orderBy: { date: 'asc' },
-      select: { date: true, total: true }
-    }),
-    prisma.invoice.findMany({
-      where: { ...branchFilter, type: 'PURCHASE', status: { in: ['ISSUED', 'PAID', 'PARTIAL'] }, date: { gte: filters.dateFrom, lte: filters.dateTo } },
-      orderBy: { date: 'asc' },
-      select: { date: true, total: true }
-    }),
-    prisma.outboxEvent.count({ where: { ...branchFilter, status: 'PENDING' } }),
-    prisma.outboxEvent.count({ where: { ...branchFilter, status: 'PUBLISHED' } })
+    prisma.orm.public.Invoice.where((r) => qw(r, { ...branchFilter, type: 'SALES', status: { in: ['ISSUED', 'PAID', 'PARTIAL'] }, date: { gte: filters.dateFrom, lte: filters.dateTo } })).select('date', 'total').orderBy((r) => r.date.asc()).all(),
+    prisma.orm.public.Invoice.where((r) => qw(r, { ...branchFilter, type: 'PURCHASE', status: { in: ['ISSUED', 'PAID', 'PARTIAL'] }, date: { gte: filters.dateFrom, lte: filters.dateTo } })).select('date', 'total').orderBy((r) => r.date.asc()).all(),
+    prisma.orm.public.OutboxEvent.where((r) => qw(r, { ...branchFilter, status: 'PENDING' })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n),
+    prisma.orm.public.OutboxEvent.where((r) => qw(r, { ...branchFilter, status: 'PUBLISHED' })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n)
   ]);
 
   const alerts: DashboardAlertItem[] = [];

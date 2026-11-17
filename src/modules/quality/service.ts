@@ -1,3 +1,4 @@
+import { qw } from '../../utils/where';
 import { prisma } from '../../config/database';
 import { enqueueOutboxEvent } from '../../platform/events/outbox';
 import { buildSequentialNumberFromLatest } from '../../utils/id-generator';
@@ -214,18 +215,18 @@ export async function listInspections(query: any) {
   Object.assign(where, buildDateRange(query, 'inspectionDate'));
 
   const [rows, total] = await Promise.all([
-    prisma.inspection.findMany({ where, skip: page.skip, take: page.limit, orderBy: [{ inspectionDate: 'desc' }, { id: 'desc' }] }),
-    prisma.inspection.count({ where })
+    prisma.orm.public.Inspection.where((r) => qw(r, where)).orderBy([(r) => r.inspectionDate.desc(), (r) => r.id.desc()]).offset(page.skip).limit(page.limit).all(),
+    prisma.orm.public.Inspection.where((r) => qw(r, where)).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n)
   ]);
 
   return {
-    rows: await prisma.$transaction((tx) => enrichInspectionRows(tx, rows)),
+    rows: await prisma.transaction(async (tx) => enrichInspectionRows(tx, rows)),
     meta: { page: page.page, limit: page.limit, total, pages: Math.max(1, Math.ceil(total / page.limit)) }
   };
 }
 
 export async function createInspection(data: any, userId: number) {
-  return prisma.$transaction(async (tx) => {
+  return prisma.transaction(async (tx) => {{
     const projectId = toPositiveInt(data.projectId, 'projectId', true);
     const standardId = toPositiveInt(data.standardId, 'standardId', true);
     const inspectorEmployeeId = toPositiveInt(data.inspectorEmployeeId, 'inspectorEmployeeId', true);
@@ -234,8 +235,7 @@ export async function createInspection(data: any, userId: number) {
     await ensureEmployee(tx, inspectorEmployeeId);
     const branchId = toPositiveInt(data.branchId ?? project?.branchId, 'branchId', true);
 
-    const row = await tx.inspection.create({
-      data: {
+    const row = await tx.orm.public.Inspection.create({
         number: data.number ?? (await generateNumber(tx, 'inspection', 'INS')),
         branchId,
         projectId,
@@ -253,8 +253,7 @@ export async function createInspection(data: any, userId: number) {
         createdById: userId,
         updatedById: userId,
         attachmentsCount: Number(data.attachmentsCount ?? 0)
-      }
-    });
+      });
 
     await enqueueOutboxEvent(tx, {
       eventType: 'quality.inspection.created',
@@ -266,24 +265,21 @@ export async function createInspection(data: any, userId: number) {
     });
 
     return fetchInspection(tx, row.id);
-  });
+  }});
 }
 
 export async function submitInspection(id: number, userId: number) {
-  return prisma.$transaction(async (tx) => {
-    const row = await tx.inspection.findUnique({ where: { id } });
+  return prisma.transaction(async (tx) => {{
+    const row = await tx.orm.public.Inspection.first({ id });
     if (!row) throw Errors.notFound('الفحص غير موجود');
     if (row.approvalStatus === 'APPROVED') throw Errors.business('تم اعتماد الفحص بالفعل');
 
-    await tx.inspection.update({
-      where: { id },
-      data: {
+    await tx.orm.public.Inspection.where((r) => qw(r, { id })).update({
         status: 'SUBMITTED',
         approvalStatus: 'PENDING',
         submittedAt: new Date(),
         updatedById: userId
-      }
-    });
+      }).then((r0) => r0!);
 
     await enqueueOutboxEvent(tx, {
       eventType: 'quality.inspection.submitted',
@@ -295,24 +291,21 @@ export async function submitInspection(id: number, userId: number) {
     });
 
     return fetchInspection(tx, id);
-  });
+  }});
 }
 
 export async function approveInspection(id: number, userId: number) {
-  return prisma.$transaction(async (tx) => {
-    const row = await tx.inspection.findUnique({ where: { id } });
+  return prisma.transaction(async (tx) => {{
+    const row = await tx.orm.public.Inspection.first({ id });
     if (!row) throw Errors.notFound('الفحص غير موجود');
     if (row.approvalStatus !== 'PENDING') throw Errors.business('الفحص غير جاهز للاعتماد');
 
-    await tx.inspection.update({
-      where: { id },
-      data: {
+    await tx.orm.public.Inspection.where((r) => qw(r, { id })).update({
         status: 'APPROVED',
         approvalStatus: 'APPROVED',
         approvedAt: new Date(),
         updatedById: userId
-      }
-    });
+      }).then((r0) => r0!);
 
     await enqueueOutboxEvent(tx, {
       eventType: 'quality.inspection.approved',
@@ -324,7 +317,7 @@ export async function approveInspection(id: number, userId: number) {
     });
 
     return fetchInspection(tx, id);
-  });
+  }});
 }
 
 export async function listNcrReports(query: any) {
@@ -337,26 +330,25 @@ export async function listNcrReports(query: any) {
   Object.assign(where, buildDateRange(query, 'reportDate'));
 
   const [rows, total] = await Promise.all([
-    prisma.ncrReport.findMany({ where, skip: page.skip, take: page.limit, orderBy: [{ reportDate: 'desc' }, { id: 'desc' }] }),
-    prisma.ncrReport.count({ where })
+    prisma.orm.public.NcrReport.where((r) => qw(r, where)).orderBy([(r) => r.reportDate.desc(), (r) => r.id.desc()]).offset(page.skip).limit(page.limit).all(),
+    prisma.orm.public.NcrReport.where((r) => qw(r, where)).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n)
   ]);
 
   return {
-    rows: await prisma.$transaction((tx) => enrichNcrRows(tx, rows)),
+    rows: await prisma.transaction(async (tx) => enrichNcrRows(tx, rows)),
     meta: { page: page.page, limit: page.limit, total, pages: Math.max(1, Math.ceil(total / page.limit)) }
   };
 }
 
 export async function createNcrReport(data: any, userId: number) {
-  return prisma.$transaction(async (tx) => {
+  return prisma.transaction(async (tx) => {{
     const projectId = toPositiveInt(data.projectId, 'projectId', true);
     const inspectionId = toPositiveInt(data.inspectionId, 'inspectionId', true);
     const inspection = await ensureInspection(tx, inspectionId);
     const project = await ensureProject(tx, projectId ?? inspection?.projectId ?? null);
     const branchId = toPositiveInt(data.branchId ?? inspection?.branchId ?? project?.branchId, 'branchId', true);
 
-    const row = await tx.ncrReport.create({
-      data: {
+    const row = await tx.orm.public.NcrReport.create({
         number: data.number ?? (await generateNumber(tx, 'ncrReport', 'NCR')),
         branchId,
         projectId: project?.id ?? null,
@@ -371,8 +363,7 @@ export async function createNcrReport(data: any, userId: number) {
         postingStatus: 'NOT_APPLICABLE',
         createdById: userId,
         updatedById: userId
-      }
-    });
+      });
 
     await enqueueOutboxEvent(tx, {
       eventType: 'quality.ncr.created',
@@ -384,25 +375,22 @@ export async function createNcrReport(data: any, userId: number) {
     });
 
     return fetchNcr(tx, row.id);
-  });
+  }});
 }
 
 export async function closeNcrReport(id: number, userId: number, data?: any) {
-  return prisma.$transaction(async (tx) => {
-    const row = await tx.ncrReport.findUnique({ where: { id } });
+  return prisma.transaction(async (tx) => {{
+    const row = await tx.orm.public.NcrReport.first({ id });
     if (!row) throw Errors.notFound('تقرير عدم المطابقة غير موجود');
     if (row.status === 'CLOSED') throw Errors.business('تم إغلاق التقرير مسبقًا');
 
-    await tx.ncrReport.update({
-      where: { id },
-      data: {
+    await tx.orm.public.NcrReport.where((r) => qw(r, { id })).update({
         status: 'CLOSED',
         closedAt: new Date(),
         closedById: userId,
         correctiveAction: toText(data?.notes) ?? row.correctiveAction,
         updatedById: userId
-      }
-    });
+      }).then((r0) => r0!);
 
     await enqueueOutboxEvent(tx, {
       eventType: 'quality.ncr.closed',
@@ -414,7 +402,7 @@ export async function closeNcrReport(id: number, userId: number, data?: any) {
     });
 
     return fetchNcr(tx, id);
-  });
+  }});
 }
 
 export async function listSafetyIncidents(query: any) {
@@ -427,26 +415,25 @@ export async function listSafetyIncidents(query: any) {
   Object.assign(where, buildDateRange(query, 'incidentDate'));
 
   const [rows, total] = await Promise.all([
-    prisma.safetyIncident.findMany({ where, skip: page.skip, take: page.limit, orderBy: [{ incidentDate: 'desc' }, { id: 'desc' }] }),
-    prisma.safetyIncident.count({ where })
+    prisma.orm.public.SafetyIncident.where((r) => qw(r, where)).orderBy([(r) => r.incidentDate.desc(), (r) => r.id.desc()]).offset(page.skip).limit(page.limit).all(),
+    prisma.orm.public.SafetyIncident.where((r) => qw(r, where)).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n)
   ]);
 
   return {
-    rows: await prisma.$transaction((tx) => enrichIncidentRows(tx, rows)),
+    rows: await prisma.transaction(async (tx) => enrichIncidentRows(tx, rows)),
     meta: { page: page.page, limit: page.limit, total, pages: Math.max(1, Math.ceil(total / page.limit)) }
   };
 }
 
 export async function createSafetyIncident(data: any, userId: number) {
-  return prisma.$transaction(async (tx) => {
+  return prisma.transaction(async (tx) => {{
     const permitId = toPositiveInt(data.permitId, 'permitId', true);
     const permit = await ensurePermit(tx, permitId);
     const projectId = toPositiveInt(data.projectId ?? permit?.projectId, 'projectId', true);
     const project = await ensureProject(tx, projectId);
     const branchId = toPositiveInt(data.branchId ?? permit?.branchId ?? project?.branchId, 'branchId', true);
 
-    const row = await tx.safetyIncident.create({
-      data: {
+    const row = await tx.orm.public.SafetyIncident.create({
         number: data.number ?? (await generateNumber(tx, 'safetyIncident', 'INC')),
         branchId,
         projectId: project?.id ?? null,
@@ -461,8 +448,7 @@ export async function createSafetyIncident(data: any, userId: number) {
         postingStatus: 'NOT_APPLICABLE',
         createdById: userId,
         updatedById: userId
-      }
-    });
+      });
 
     await enqueueOutboxEvent(tx, {
       eventType: 'quality.incident.created',
@@ -474,25 +460,22 @@ export async function createSafetyIncident(data: any, userId: number) {
     });
 
     return fetchIncident(tx, row.id);
-  });
+  }});
 }
 
 export async function resolveSafetyIncident(id: number, userId: number, data?: any) {
-  return prisma.$transaction(async (tx) => {
-    const row = await tx.safetyIncident.findUnique({ where: { id } });
+  return prisma.transaction(async (tx) => {{
+    const row = await tx.orm.public.SafetyIncident.first({ id });
     if (!row) throw Errors.notFound('حادث السلامة غير موجود');
     if (row.status === 'RESOLVED') throw Errors.business('تمت معالجة الحادث مسبقًا');
 
-    await tx.safetyIncident.update({
-      where: { id },
-      data: {
+    await tx.orm.public.SafetyIncident.where((r) => qw(r, { id })).update({
         status: 'RESOLVED',
         resolvedAt: new Date(),
         resolvedById: userId,
         updatedById: userId,
         description: toText(data?.notes) ?? row.description
-      }
-    });
+      }).then((r0) => r0!);
 
     await enqueueOutboxEvent(tx, {
       eventType: 'quality.incident.resolved',
@@ -504,7 +487,7 @@ export async function resolveSafetyIncident(id: number, userId: number, data?: a
     });
 
     return fetchIncident(tx, id);
-  });
+  }});
 }
 
 export async function listPermits(query: any) {
@@ -517,18 +500,18 @@ export async function listPermits(query: any) {
   Object.assign(where, buildDateRange(query, 'validTo'));
 
   const [rows, total] = await Promise.all([
-    prisma.permitToWork.findMany({ where, skip: page.skip, take: page.limit, orderBy: [{ validTo: 'asc' }, { id: 'desc' }] }),
-    prisma.permitToWork.count({ where })
+    prisma.orm.public.PermitToWork.where((r) => qw(r, where)).orderBy([(r) => r.validTo.asc(), (r) => r.id.desc()]).offset(page.skip).limit(page.limit).all(),
+    prisma.orm.public.PermitToWork.where((r) => qw(r, where)).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n)
   ]);
 
   return {
-    rows: await prisma.$transaction((tx) => enrichPermitRows(tx, rows)),
+    rows: await prisma.transaction(async (tx) => enrichPermitRows(tx, rows)),
     meta: { page: page.page, limit: page.limit, total, pages: Math.max(1, Math.ceil(total / page.limit)) }
   };
 }
 
 export async function createPermit(data: any, userId: number) {
-  return prisma.$transaction(async (tx) => {
+  return prisma.transaction(async (tx) => {{
     const projectId = toPositiveInt(data.projectId, 'projectId', true);
     const issuerEmployeeId = toPositiveInt(data.issuerEmployeeId, 'issuerEmployeeId', true);
     const approverEmployeeId = toPositiveInt(data.approverEmployeeId, 'approverEmployeeId', true);
@@ -537,8 +520,7 @@ export async function createPermit(data: any, userId: number) {
     await ensureEmployee(tx, approverEmployeeId);
     const branchId = toPositiveInt(data.branchId ?? project?.branchId, 'branchId', true);
 
-    const row = await tx.permitToWork.create({
-      data: {
+    const row = await tx.orm.public.PermitToWork.create({
         number: data.number ?? (await generateNumber(tx, 'permitToWork', 'PTW')),
         branchId,
         projectId,
@@ -554,8 +536,7 @@ export async function createPermit(data: any, userId: number) {
         notes: toText(data.notes),
         createdById: userId,
         updatedById: userId
-      }
-    });
+      });
 
     await enqueueOutboxEvent(tx, {
       eventType: 'quality.permit.created',
@@ -567,25 +548,22 @@ export async function createPermit(data: any, userId: number) {
     });
 
     return fetchPermitRow(tx, row.id);
-  });
+  }});
 }
 
 export async function approvePermit(id: number, userId: number, data?: any) {
-  return prisma.$transaction(async (tx) => {
-    const row = await tx.permitToWork.findUnique({ where: { id } });
+  return prisma.transaction(async (tx) => {{
+    const row = await tx.orm.public.PermitToWork.first({ id });
     if (!row) throw Errors.notFound('تصريح العمل غير موجود');
     if (row.approvalStatus === 'APPROVED') throw Errors.business('تم اعتماد التصريح مسبقًا');
 
-    await tx.permitToWork.update({
-      where: { id },
-      data: {
+    await tx.orm.public.PermitToWork.where((r) => qw(r, { id })).update({
         status: 'ACTIVE',
         approvalStatus: 'APPROVED',
         approvedAt: new Date(),
         updatedById: userId,
         notes: toText(data?.notes) ?? row.notes
-      }
-    });
+      }).then((r0) => r0!);
 
     await enqueueOutboxEvent(tx, {
       eventType: 'quality.permit.approved',
@@ -597,5 +575,5 @@ export async function approvePermit(id: number, userId: number, data?: any) {
     });
 
     return fetchPermitRow(tx, id);
-  });
+  }});
 }

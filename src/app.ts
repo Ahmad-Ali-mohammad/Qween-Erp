@@ -56,13 +56,13 @@ app.get('/api/health', (_req, res) => {
 
 app.use('/api', apiRoutes);
 
-app.use(express.static(path.join(process.cwd(), 'frontend')));
+app.use(express.static(path.join(__dirname, 'frontend')));
 app.get('*', (req, res, next) => {
   if (req.path.startsWith('/api')) {
     next();
     return;
   }
-  res.sendFile(path.join(process.cwd(), 'frontend/index.html'));
+  res.sendFile(path.join(__dirname, 'frontend/index.html'));
 });
 
 app.use(notFound);

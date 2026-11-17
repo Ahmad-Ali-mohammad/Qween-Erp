@@ -41,7 +41,7 @@ function normalizeAmount(value: unknown): number {
 }
 
 export async function awardOpportunity(opportunityId: number, data: any, userId: number) {
-  return prisma.$transaction((tx) => awardOpportunityWithTransaction(tx, opportunityId, data, userId));
+  return prisma.transaction(async (tx) => awardOpportunityWithTransaction(tx, opportunityId, data, userId));
 }
 
 export async function awardOpportunityWithTransaction(tx: any, opportunityId: number, data: any, userId: number) {

@@ -1,3 +1,4 @@
+import { qw } from '../../utils/where';
 import OpenAI from 'openai';
 import { prisma } from '../../config/database';
 import { env } from '../../config/env';
@@ -108,17 +109,12 @@ function buildFallbackAnswer(query: string, snapshot: AssistantSnapshot): string
 
 async function buildAssistantSnapshot(): Promise<AssistantSnapshot> {
   const [draftJournals, pendingInvoices, pendingPayments, items, openProjectTasks, recentSalesInvoices] = await Promise.all([
-    prisma.journalEntry.count({ where: { status: 'DRAFT' } }),
-    prisma.invoice.count({ where: { status: { in: ['DRAFT', 'ISSUED', 'PARTIAL'] } } }),
-    prisma.payment.count({ where: { status: 'PENDING' } }),
-    prisma.item.findMany({ where: { isActive: true }, select: { onHandQty: true, reorderPoint: true } }),
-    prisma.projectTask.count({ where: { status: { in: ['TODO', 'IN_PROGRESS'] } } }),
-    prisma.invoice.findMany({
-      where: { type: 'SALES' },
-      select: { number: true, total: true, status: true },
-      orderBy: [{ date: 'desc' }, { id: 'desc' }],
-      take: 3
-    })
+    prisma.orm.public.JournalEntry.where((r) => qw(r, { status: 'DRAFT' })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n),
+    prisma.orm.public.Invoice.where((r) => qw(r, { status: { in: ['DRAFT', 'ISSUED', 'PARTIAL'] } })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n),
+    prisma.orm.public.Payment.where((r) => qw(r, { status: 'PENDING' })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n),
+    prisma.orm.public.Item.where((r) => qw(r, { isActive: true })).select('onHandQty', 'reorderPoint').all(),
+    prisma.orm.public.ProjectTask.where((r) => qw(r, { status: { in: ['TODO', 'IN_PROGRESS'] } })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n),
+    prisma.orm.public.Invoice.where((r) => qw(r, { type: 'SALES' })).select('number', 'total', 'status').orderBy([(r) => r.date.desc(), (r) => r.id.desc()]).limit(3).all()
   ]);
 
   const lowStockItems = items.filter((item) => Number(item.onHandQty) <= Number(item.reorderPoint)).length;

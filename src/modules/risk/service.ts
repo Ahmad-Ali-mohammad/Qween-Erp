@@ -1,3 +1,4 @@
+import { qw } from '../../utils/where';
 import { prisma } from '../../config/database';
 import { enqueueOutboxEvent } from '../../platform/events/outbox';
 import { buildSequentialNumberFromLatest } from '../../utils/id-generator';
@@ -217,18 +218,18 @@ export async function listRiskRegisters(query: any) {
   if (query.severity) where.severity = String(query.severity).toUpperCase();
 
   const [rows, total] = await Promise.all([
-    prisma.riskRegister.findMany({ where, skip: page.skip, take: page.limit, orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }] }),
-    prisma.riskRegister.count({ where })
+    prisma.orm.public.RiskRegister.where((r) => qw(r, where)).orderBy([(r) => r.updatedAt.desc(), (r) => r.id.desc()]).offset(page.skip).limit(page.limit).all(),
+    prisma.orm.public.RiskRegister.where((r) => qw(r, where)).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n)
   ]);
 
   return {
-    rows: await prisma.$transaction((tx) => enrichRiskRows(tx, rows)),
+    rows: await prisma.transaction(async (tx) => enrichRiskRows(tx, rows)),
     meta: { page: page.page, limit: page.limit, total, pages: Math.max(1, Math.ceil(total / page.limit)) }
   };
 }
 
 export async function createRiskRegister(data: any, userId: number) {
-  return prisma.$transaction(async (tx) => {
+  return prisma.transaction(async (tx) => {{
     const projectId = toPositiveInt(data.projectId, 'projectId', true);
     const contractId = toPositiveInt(data.contractId, 'contractId', true);
     const departmentId = toPositiveInt(data.departmentId, 'departmentId', true);
@@ -243,8 +244,7 @@ export async function createRiskRegister(data: any, userId: number) {
     const exposure = roundAmount(probability * impact);
     const severity = classifySeverity(exposure);
 
-    const row = await tx.riskRegister.create({
-      data: {
+    const row = await tx.orm.public.RiskRegister.create({
         code: data.code ?? (await generateCode(tx)),
         branchId,
         projectId,
@@ -264,8 +264,7 @@ export async function createRiskRegister(data: any, userId: number) {
         postingStatus: 'NOT_APPLICABLE',
         createdById: userId,
         updatedById: userId
-      }
-    });
+      });
 
     await enqueueOutboxEvent(tx, {
       eventType: 'risk.register.created',
@@ -277,7 +276,7 @@ export async function createRiskRegister(data: any, userId: number) {
     });
 
     return fetchRiskRow(tx, row.id);
-  });
+  }});
 }
 
 export async function listAssessments(query: any) {
@@ -287,18 +286,18 @@ export async function listAssessments(query: any) {
   Object.assign(where, buildDateRange(query, 'assessmentDate'));
 
   const [rows, total] = await Promise.all([
-    prisma.riskAssessment.findMany({ where, skip: page.skip, take: page.limit, orderBy: [{ assessmentDate: 'desc' }, { id: 'desc' }] }),
-    prisma.riskAssessment.count({ where })
+    prisma.orm.public.RiskAssessment.where((r) => qw(r, where)).orderBy([(r) => r.assessmentDate.desc(), (r) => r.id.desc()]).offset(page.skip).limit(page.limit).all(),
+    prisma.orm.public.RiskAssessment.where((r) => qw(r, where)).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n)
   ]);
 
   return {
-    rows: await prisma.$transaction((tx) => enrichAssessmentRows(tx, rows)),
+    rows: await prisma.transaction(async (tx) => enrichAssessmentRows(tx, rows)),
     meta: { page: page.page, limit: page.limit, total, pages: Math.max(1, Math.ceil(total / page.limit)) }
   };
 }
 
 export async function createAssessment(data: any, userId: number) {
-  return prisma.$transaction(async (tx) => {
+  return prisma.transaction(async (tx) => {{
     const riskId = toPositiveInt(data.riskId, 'riskId')!;
     const risk = await ensureRisk(tx, riskId);
     const probability = toAmount(data.probability, 'probability') ?? 0;
@@ -306,8 +305,7 @@ export async function createAssessment(data: any, userId: number) {
     const exposure = roundAmount(probability * impact);
     const severity = classifySeverity(exposure);
 
-    const row = await tx.riskAssessment.create({
-      data: {
+    const row = await tx.orm.public.RiskAssessment.create({
         riskId,
         assessmentDate: data.assessmentDate ? parseDateOrThrow(data.assessmentDate, 'assessmentDate') : new Date(),
         probability,
@@ -317,19 +315,15 @@ export async function createAssessment(data: any, userId: number) {
         notes: toText(data.notes),
         createdById: userId,
         updatedById: userId
-      }
-    });
+      });
 
-    await tx.riskRegister.update({
-      where: { id: riskId },
-      data: {
+    await tx.orm.public.RiskRegister.where((r) => qw(r, { id: riskId })).update({
         probability,
         impact,
         exposure,
         severity,
         updatedById: userId
-      }
-    });
+      }).then((r0) => r0!);
 
     await enqueueOutboxEvent(tx, {
       eventType: 'risk.assessment.recorded',
@@ -341,7 +335,7 @@ export async function createAssessment(data: any, userId: number) {
     });
 
     return fetchAssessment(tx, row.id);
-  });
+  }});
 }
 
 export async function listMitigations(query: any) {
@@ -352,25 +346,24 @@ export async function listMitigations(query: any) {
   Object.assign(where, buildDateRange(query, 'dueDate'));
 
   const [rows, total] = await Promise.all([
-    prisma.mitigationPlan.findMany({ where, skip: page.skip, take: page.limit, orderBy: [{ dueDate: 'asc' }, { id: 'desc' }] }),
-    prisma.mitigationPlan.count({ where })
+    prisma.orm.public.MitigationPlan.where((r) => qw(r, where)).orderBy([(r) => r.dueDate.asc(), (r) => r.id.desc()]).offset(page.skip).limit(page.limit).all(),
+    prisma.orm.public.MitigationPlan.where((r) => qw(r, where)).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n)
   ]);
 
   return {
-    rows: await prisma.$transaction((tx) => enrichMitigationRows(tx, rows)),
+    rows: await prisma.transaction(async (tx) => enrichMitigationRows(tx, rows)),
     meta: { page: page.page, limit: page.limit, total, pages: Math.max(1, Math.ceil(total / page.limit)) }
   };
 }
 
 export async function createMitigation(data: any, userId: number) {
-  return prisma.$transaction(async (tx) => {
+  return prisma.transaction(async (tx) => {{
     const riskId = toPositiveInt(data.riskId, 'riskId')!;
     const risk = await ensureRisk(tx, riskId);
     const ownerEmployeeId = toPositiveInt(data.ownerEmployeeId, 'ownerEmployeeId', true);
     await ensureEmployee(tx, ownerEmployeeId);
 
-    const row = await tx.mitigationPlan.create({
-      data: {
+    const row = await tx.orm.public.MitigationPlan.create({
         riskId,
         title: String(data.title).trim(),
         description: toText(data.description),
@@ -381,8 +374,7 @@ export async function createMitigation(data: any, userId: number) {
         postingStatus: 'NOT_APPLICABLE',
         createdById: userId,
         updatedById: userId
-      }
-    });
+      });
 
     await enqueueOutboxEvent(tx, {
       eventType: 'risk.mitigation.created',
@@ -405,7 +397,7 @@ export async function createMitigation(data: any, userId: number) {
     }
 
     return fetchMitigation(tx, row.id);
-  });
+  }});
 }
 
 export async function listFollowups(query: any) {
@@ -416,23 +408,22 @@ export async function listFollowups(query: any) {
   Object.assign(where, buildDateRange(query, 'followupDate'));
 
   const [rows, total] = await Promise.all([
-    prisma.riskFollowup.findMany({ where, skip: page.skip, take: page.limit, orderBy: [{ followupDate: 'desc' }, { id: 'desc' }] }),
-    prisma.riskFollowup.count({ where })
+    prisma.orm.public.RiskFollowup.where((r) => qw(r, where)).orderBy([(r) => r.followupDate.desc(), (r) => r.id.desc()]).offset(page.skip).limit(page.limit).all(),
+    prisma.orm.public.RiskFollowup.where((r) => qw(r, where)).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n)
   ]);
 
   return {
-    rows: await prisma.$transaction((tx) => enrichFollowupRows(tx, rows)),
+    rows: await prisma.transaction(async (tx) => enrichFollowupRows(tx, rows)),
     meta: { page: page.page, limit: page.limit, total, pages: Math.max(1, Math.ceil(total / page.limit)) }
   };
 }
 
 export async function createFollowup(data: any, userId: number) {
-  return prisma.$transaction(async (tx) => {
+  return prisma.transaction(async (tx) => {{
     const riskId = toPositiveInt(data.riskId, 'riskId')!;
     const risk = await ensureRisk(tx, riskId);
 
-    const row = await tx.riskFollowup.create({
-      data: {
+    const row = await tx.orm.public.RiskFollowup.create({
         riskId,
         followupDate: data.followupDate ? parseDateOrThrow(data.followupDate, 'followupDate') : new Date(),
         status: String(data.status ?? 'OPEN').toUpperCase(),
@@ -441,8 +432,7 @@ export async function createFollowup(data: any, userId: number) {
         nextReviewDate: data.nextReviewDate ? parseDateOrThrow(data.nextReviewDate, 'nextReviewDate') : null,
         createdById: userId,
         updatedById: userId
-      }
-    });
+      });
 
     await enqueueOutboxEvent(tx, {
       eventType: 'risk.followup.logged',
@@ -454,5 +444,5 @@ export async function createFollowup(data: any, userId: number) {
     });
 
     return fetchFollowup(tx, row.id);
-  });
+  }});
 }

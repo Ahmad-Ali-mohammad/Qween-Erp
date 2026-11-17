@@ -1,4 +1,5 @@
 ﻿import { prisma } from '../../config/database';
+import { qw } from '../../utils/where';
 import { Errors } from '../../utils/response';
 
 type TreeNode = {
@@ -26,7 +27,7 @@ type TreeNode = {
 };
 
 async function ensureAccountExists(id: number) {
-  const account = await prisma.account.findUnique({ where: { id } });
+  const account = await prisma.orm.public.Account.first({ id });
   if (!account) throw Errors.notFound('الحساب غير موجود');
   return account;
 }
@@ -34,7 +35,7 @@ async function ensureAccountExists(id: number) {
 async function ensureParentRules(childType: string, parentId: number | null) {
   if (!parentId) return null;
 
-  const parent = await prisma.account.findUnique({ where: { id: parentId } });
+  const parent = await prisma.orm.public.Account.first({ id: parentId });
   if (!parent) throw Errors.notFound('الحساب الأب غير موجود');
   if (!parent.isActive) throw Errors.business('الحساب الأب غير نشط');
   if (parent.type !== (childType as any)) {
@@ -49,10 +50,7 @@ async function isDescendant(candidateParentId: number, childId: number): Promise
 
   while (currentId) {
     if (currentId === childId) return true;
-    const current: { parentId: number | null } | null = await prisma.account.findUnique({
-      where: { id: currentId },
-      select: { parentId: true }
-    });
+    const current: { parentId: number | null } | null = await prisma.orm.public.Account.select('parentId').first({ id: currentId });
     currentId = current?.parentId ?? null;
   }
 
@@ -60,12 +58,9 @@ async function isDescendant(candidateParentId: number, childId: number): Promise
 }
 
 async function recalculateSubtreeLevels(rootId: number): Promise<void> {
-  const accounts = await prisma.account.findMany({
-    where: {
+  const accounts = await prisma.orm.public.Account.where((r) => qw(r, {
       OR: [{ id: rootId }, { parentId: rootId }]
-    },
-    select: { id: true, parentId: true, level: true }
-  });
+    })).select('id', 'parentId', 'level').all();
 
   const all = new Map<number, { id: number; parentId: number | null; level: number }>();
   for (const acc of accounts) all.set(acc.id, acc);
@@ -73,34 +68,33 @@ async function recalculateSubtreeLevels(rootId: number): Promise<void> {
   const queue: number[] = [rootId];
   while (queue.length) {
     const id = queue.shift()!;
-    const node = all.get(id) ?? (await prisma.account.findUnique({ where: { id }, select: { id: true, parentId: true, level: true } }));
+    const node = all.get(id) ?? (await prisma.orm.public.Account.select('id', 'parentId', 'level').first({ id }));
     if (!node) continue;
 
     const parentLevel = node.parentId
-      ? (await prisma.account.findUnique({ where: { id: node.parentId }, select: { level: true } }))?.level ?? 0
+      ? (await prisma.orm.public.Account.select('level').first({ id: node.parentId }))?.level ?? 0
       : 0;
     const newLevel = parentLevel + 1;
 
     if (node.level !== newLevel) {
-      await prisma.account.update({ where: { id: node.id }, data: { level: newLevel } });
+      await prisma.orm.public.Account.where((r) => qw(r, { id: node.id })).update({ level: newLevel }).then((r0) => r0!);
       node.level = newLevel;
       all.set(node.id, node);
     }
 
-    const children = await prisma.account.findMany({ where: { parentId: id }, select: { id: true } });
+    const children = await prisma.orm.public.Account.where((r) => qw(r, { parentId: id })).select('id').all();
     for (const child of children) queue.push(child.id);
   }
 }
 
 export async function createAccount(data: any) {
-  const exists = await prisma.account.findUnique({ where: { code: data.code } });
+  const exists = await prisma.orm.public.Account.first({ code: data.code });
   if (exists) throw Errors.conflict('رمز الحساب موجود بالفعل');
 
   const parent = await ensureParentRules(data.type, data.parentId ?? null);
   const level = parent ? parent.level + 1 : 1;
 
-  const account = await prisma.account.create({
-    data: {
+  const account = await prisma.orm.public.Account.create({
       ...data,
       level,
       parentId: parent?.id,
@@ -109,14 +103,10 @@ export async function createAccount(data: any) {
       normalBalance:
         data.normalBalance ??
         (data.type === 'ASSET' || data.type === 'EXPENSE' ? 'Debit' : 'Credit')
-    }
-  });
+    });
 
   if (parent && parent.allowPosting) {
-    await prisma.account.update({
-      where: { id: parent.id },
-      data: { allowPosting: false, isControl: true }
-    });
+    await prisma.orm.public.Account.where((r) => qw(r, { id: parent.id })).update({ allowPosting: false, isControl: true }).then((r0) => r0!);
   }
 
   return account;
@@ -138,14 +128,11 @@ export async function updateAccount(id: number, data: any) {
   const parent = await ensureParentRules(nextType, nextParentId ?? null);
   const level = parent ? parent.level + 1 : 1;
 
-  const updated = await prisma.account.update({
-    where: { id },
-    data: {
+  const updated = await prisma.orm.public.Account.where((r) => qw(r, { id })).update({
       ...data,
       parentId: parent?.id ?? null,
       level
-    }
-  });
+    }).then((r0) => r0!);
 
   if (data.parentId !== undefined) {
     await recalculateSubtreeLevels(id);
@@ -164,13 +151,10 @@ export async function moveAccount(id: number, newParentId: number | null) {
 
   const parent = await ensureParentRules(account.type, newParentId);
 
-  const moved = await prisma.account.update({
-    where: { id },
-    data: {
+  const moved = await prisma.orm.public.Account.where((r) => qw(r, { id })).update({
       parentId: parent?.id ?? null,
       level: parent ? parent.level + 1 : 1
-    }
-  });
+    }).then((r0) => r0!);
 
   await recalculateSubtreeLevels(moved.id);
   return moved;
@@ -178,31 +162,25 @@ export async function moveAccount(id: number, newParentId: number | null) {
 
 export async function togglePosting(id: number, allowPosting: boolean) {
   const account = await ensureAccountExists(id);
-  const childrenCount = await prisma.account.count({ where: { parentId: id } });
+  const childrenCount = await prisma.orm.public.Account.where((r) => qw(r, { parentId: id })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n);
 
   if (allowPosting && childrenCount > 0) {
     throw Errors.business('الحساب الأب لا يمكن أن يكون قابلًا للترحيل طالما لديه أبناء');
   }
 
-  return prisma.account.update({
-    where: { id: account.id },
-    data: {
+  return prisma.orm.public.Account.where((r) => qw(r, { id: account.id })).update({
       allowPosting,
       isControl: !allowPosting || childrenCount > 0
-    }
-  });
+    }).then((r0) => r0!);
 }
 
 async function getLatestBalancesMap(fiscalYear?: number, period?: number): Promise<Map<number, { debit: number; credit: number; closingBalance: number }>> {
   const map = new Map<number, { debit: number; credit: number; closingBalance: number }>();
 
-  const balances = await prisma.accountBalance.findMany({
-    where: {
+  const balances = await prisma.orm.public.AccountBalance.where((r) => qw(r, {
       ...(fiscalYear ? { fiscalYear } : {}),
       ...(period ? { period } : {})
-    },
-    orderBy: [{ fiscalYear: 'desc' }, { period: 'desc' }]
-  });
+    })).orderBy([(r) => r.fiscalYear.desc(), (r) => r.period.desc()]).all();
 
   for (const b of balances) {
     if (map.has(b.accountId)) continue;
@@ -218,10 +196,7 @@ async function getLatestBalancesMap(fiscalYear?: number, period?: number): Promi
 
 export async function getTree(options?: { includeInactive?: boolean; fiscalYear?: number; period?: number }) {
   const includeInactive = options?.includeInactive ?? false;
-  const accounts = await prisma.account.findMany({
-    where: includeInactive ? {} : { isActive: true },
-    orderBy: { code: 'asc' }
-  });
+  const accounts = await prisma.orm.public.Account.where((r) => qw(r, includeInactive ? {} : { isActive: true })).orderBy((r) => r.code.asc()).all();
 
   const balanceMap = await getLatestBalancesMap(options?.fiscalYear, options?.period);
 
@@ -290,20 +265,16 @@ export async function getBalance(accountId: number, fiscalYear?: number, period?
   if (fiscalYear) where.fiscalYear = fiscalYear;
   if (period) where.period = period;
 
-  const account = await prisma.account.findUnique({ where: { id: accountId } });
+  const account = await prisma.orm.public.Account.first({ id: accountId });
   if (!account) throw Errors.notFound('الحساب غير موجود');
 
-  const balances = await prisma.accountBalance.findMany({
-    where,
-    orderBy: [{ fiscalYear: 'desc' }, { period: 'desc' }],
-    take: 24
-  });
+  const balances = await prisma.orm.public.AccountBalance.where((r) => qw(r, where)).orderBy([(r) => r.fiscalYear.desc(), (r) => r.period.desc()]).limit(24).all();
 
   return { account, balances };
 }
 
 export async function rebuildLevels() {
-  const roots = await prisma.account.findMany({ where: { parentId: null }, select: { id: true } });
+  const roots = await prisma.orm.public.Account.where((r) => qw(r, { parentId: null })).select('id').all();
   for (const root of roots) {
     await recalculateSubtreeLevels(root.id);
   }

@@ -1,10 +1,11 @@
+import { qw } from '../../utils/where';
 import { Prisma } from '@prisma/client';
 import { prisma } from '../../config/database';
 import { buildSequentialNumber } from '../../utils/id-generator';
 import { Errors } from '../../utils/response';
 
 async function generateSupplierCode(): Promise<string> {
-  const count = await prisma.supplier.count();
+  const count = await prisma.orm.public.Supplier.aggregate((a) => ({ n: a.count() })).then((r0) => r0.n);
   return buildSequentialNumber('SUPP', count, new Date().getUTCFullYear());
 }
 
@@ -31,13 +32,12 @@ export async function createSupplier(data: any) {
 
   const nextTax = toNullableString(data.taxNumber);
   if (nextTax) {
-    const existing = await prisma.supplier.findFirst({ where: { taxNumber: nextTax } });
+    const existing = await prisma.orm.public.Supplier.first({ taxNumber: nextTax });
     if (existing) throw Errors.business('رقم الضريبي موجود مسبقًا');
   }
 
   const code = toNullableString(data.code) || (await generateSupplierCode());
-  return prisma.supplier.create({
-    data: {
+  return prisma.orm.public.Supplier.create({
       code,
       nameAr,
       nameEn: toNullableString(data.nameEn),
@@ -56,17 +56,16 @@ export async function createSupplier(data: any) {
       bankAccount: toNullableString(data.bankAccount),
       iban: toNullableString(data.iban),
       isActive: toBoolean(data.isActive, true)
-    }
-  });
+    });
 }
 
 export async function updateSupplier(id: number, data: any) {
-  const supplier = await prisma.supplier.findUnique({ where: { id } });
+  const supplier = await prisma.orm.public.Supplier.first({ id });
   if (!supplier) throw Errors.notFound('المورد غير موجود');
 
   const nextTax = toNullableString(data.taxNumber);
   if (nextTax && nextTax !== supplier.taxNumber) {
-    const existing = await prisma.supplier.findFirst({ where: { taxNumber: nextTax, id: { not: id } } });
+    const existing = await prisma.orm.public.Supplier.first((r) => qw(r, { taxNumber: nextTax, id: { not: id } }));
     if (existing) throw Errors.business('رقم الضريبي موجود مسبقًا');
   }
 
@@ -93,10 +92,7 @@ export async function updateSupplier(id: number, data: any) {
   if (data.iban !== undefined) updateData.iban = toNullableString(data.iban);
   if (data.isActive !== undefined) updateData.isActive = toBoolean(data.isActive, supplier.isActive);
 
-  return prisma.supplier.update({
-    where: { id },
-    data: updateData
-  });
+  return prisma.orm.public.Supplier.where((r) => qw(r, { id })).update(updateData).then((r0) => r0!);
 }
 
 export async function listSuppliers(query: any) {
@@ -118,8 +114,8 @@ export async function listSuppliers(query: any) {
   if (query.isActive !== undefined) where.isActive = String(query.isActive) === 'true';
 
   const [rows, total] = await Promise.all([
-    prisma.supplier.findMany({ where, skip, take: limit, orderBy: [{ nameAr: 'asc' }] }),
-    prisma.supplier.count({ where })
+    prisma.orm.public.Supplier.where((r) => qw(r, where)).orderBy([(r) => r.nameAr.asc()]).offset(skip).limit(limit).all(),
+    prisma.orm.public.Supplier.where((r) => qw(r, where)).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n)
   ]);
 
   return {
@@ -164,26 +160,20 @@ export async function deleteSupplier(id: number) {
     throw Errors.business('لا يمكن حذف المورد لوجود فواتير أو مدفوعات مرتبطة به');
   }
 
-  await prisma.supplier.delete({ where: { id } });
+  await prisma.orm.public.Supplier.where((r) => qw(r, { id })).delete().then((r0) => r0!);
   return { deleted: true, id };
 }
 
 export async function getSupplierStatement(id: number, query: any) {
-  const supplier = await prisma.supplier.findUnique({ where: { id } });
+  const supplier = await prisma.orm.public.Supplier.first({ id });
   if (!supplier) throw Errors.notFound('المورد غير موجود');
 
   const startDate = query.startDate ? new Date(String(query.startDate)) : new Date(supplier.createdAt);
   const endDate = query.endDate ? new Date(String(query.endDate)) : new Date();
 
   const [invoices, payments] = await Promise.all([
-    prisma.invoice.findMany({
-      where: { supplierId: id, type: 'PURCHASE', date: { gte: startDate, lte: endDate } },
-      orderBy: { date: 'asc' }
-    }),
-    prisma.payment.findMany({
-      where: { supplierId: id, date: { gte: startDate, lte: endDate } },
-      orderBy: { date: 'asc' }
-    })
+    prisma.orm.public.Invoice.where((r) => qw(r, { supplierId: id, type: 'PURCHASE', date: { gte: startDate, lte: endDate } })).orderBy((r) => r.date.asc()).all(),
+    prisma.orm.public.Payment.where((r) => qw(r, { supplierId: id, date: { gte: startDate, lte: endDate } })).orderBy((r) => r.date.asc()).all()
   ]);
 
   const transactions = [

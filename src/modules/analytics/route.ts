@@ -1,3 +1,4 @@
+import { qw } from '../../utils/where';
 import { Router, Request, Response } from 'express';
 import { prisma } from '../../config/database';
 import { authenticate } from '../../middleware/auth';
@@ -30,7 +31,7 @@ router.get('/abc', async (_req: Request, res: Response) => {
 });
 
 router.get('/clv', async (_req: Request, res: Response) => {
-  const customers = await prisma.customer.findMany({ orderBy: { currentBalance: 'desc' }, take: 200 });
+  const customers = await prisma.orm.public.Customer.orderBy((r) => r.currentBalance.desc()).limit(200).all();
   const rows = customers.map((c) => ({
     id: c.id,
     code: c.code,
@@ -43,24 +44,20 @@ router.get('/clv', async (_req: Request, res: Response) => {
 
 router.get('/sales-forecast', async (req: Request, res: Response) => {
   const branchId = Number(req.query.branchId ?? 0);
-  const invoices = await prisma.invoice.findMany({
-    where: {
+  const invoices = await prisma.orm.public.Invoice.where((r) => qw(r, {
       type: 'SALES',
       status: { in: ['ISSUED', 'PAID', 'PARTIAL'] },
       ...(branchId > 0 ? { branchId } : {})
-    },
-    select: { date: true, total: true },
-    orderBy: { date: 'asc' }
-  });
+    })).select('date', 'total').orderBy((r) => r.date.asc()).all();
 
   ok(res, buildSalesForecastFromInvoices(invoices));
 });
 
 router.get('/bsc', async (_req: Request, res: Response) => {
   const [invoiceCount, journalCount, paymentCount] = await Promise.all([
-    prisma.invoice.count(),
-    prisma.journalEntry.count(),
-    prisma.payment.count()
+    prisma.orm.public.Invoice.aggregate((a) => ({ n: a.count() })).then((r0) => r0.n),
+    prisma.orm.public.JournalEntry.aggregate((a) => ({ n: a.count() })).then((r0) => r0.n),
+    prisma.orm.public.Payment.aggregate((a) => ({ n: a.count() })).then((r0) => r0.n)
   ]);
 
   ok(res, {

@@ -1,19 +1,19 @@
+import { qw } from '../../utils/where';
 import { randomUUID } from 'crypto';
-import { Prisma, type OutboxEvent } from '@prisma/client';
-import { prisma } from '../../config/database';
+import type { CollectionRowOf } from '@prisma/orm-postgres/orm-client';
+import { prisma, type Executor } from '../../config/database';
 import { createDomainEventSchema, type CreateDomainEventInput } from './contracts';
 
-type PrismaExecutor = Prisma.TransactionClient | typeof prisma;
+type OutboxEvent = CollectionRowOf<ReturnType<typeof prisma.orm.public.OutboxEvent>>;
 
 function normalizeError(error: unknown): string {
   if (error instanceof Error) return error.message;
   return String(error);
 }
 
-export async function enqueueOutboxEvent(executor: PrismaExecutor, input: CreateDomainEventInput): Promise<OutboxEvent> {
+export async function enqueueOutboxEvent(executor: Executor, input: CreateDomainEventInput): Promise<OutboxEvent> {
   const event = createDomainEventSchema.parse(input);
-  return executor.outboxEvent.create({
-    data: {
+  return executor.orm.public.OutboxEvent.create({
       eventId: event.eventId ?? randomUUID(),
       eventType: event.eventType,
       aggregateType: event.aggregateType,
@@ -24,48 +24,35 @@ export async function enqueueOutboxEvent(executor: PrismaExecutor, input: Create
       correlationId: event.correlationId,
       version: event.version ?? 1,
       payload: event.payload
-    }
-  });
+    });
 }
 
 export async function listPendingOutboxEvents(limit = 25): Promise<OutboxEvent[]> {
-  return prisma.outboxEvent.findMany({
-    where: { status: 'PENDING' },
-    orderBy: [{ createdAt: 'asc' }],
-    take: limit
-  });
+  return prisma.orm.public.OutboxEvent.where((r) => qw(r, { status: 'PENDING' })).orderBy([(r) => r.createdAt.asc()]).limit(limit).all();
 }
 
 export async function markOutboxEventPublished(id: number): Promise<OutboxEvent> {
-  return prisma.outboxEvent.update({
-    where: { id },
-    data: {
+  return prisma.orm.public.OutboxEvent.where((r) => qw(r, { id })).update({
       status: 'PUBLISHED',
       publishedAt: new Date(),
       lastError: null
-    }
-  });
+    }).then((r0) => r0!);
 }
 
 export async function markOutboxEventFailed(id: number, error: unknown): Promise<OutboxEvent> {
-  return prisma.outboxEvent.update({
-    where: { id },
-    data: {
+  const current = await prisma.orm.public.OutboxEvent.first({ id });
+  return prisma.orm.public.OutboxEvent.where((r) => qw(r, { id })).update({
       status: 'FAILED',
-      retryCount: { increment: 1 },
+      retryCount: (current?.retryCount ?? 0) + 1,
       lastError: normalizeError(error)
-    }
-  });
+    }).then((r0) => r0!);
 }
 
 export async function retryOutboxEvent(id: number): Promise<OutboxEvent> {
-  return prisma.outboxEvent.update({
-    where: { id },
-    data: {
+  return prisma.orm.public.OutboxEvent.where((r) => qw(r, { id })).update({
       status: 'PENDING',
       lastError: null
-    }
-  });
+    }).then((r0) => r0!);
 }
 
 export async function registerEventConsumption(input: {
@@ -73,30 +60,26 @@ export async function registerEventConsumption(input: {
   eventId: string;
   outboxEventId?: number | null;
   status?: string;
-  result?: Prisma.InputJsonValue;
+  result?: unknown;
   errorMessage?: string | null;
 }) {
-  return prisma.eventConsumption.upsert({
-    where: {
-      consumerName_eventId: {
-        consumerName: input.consumerName,
-        eventId: input.eventId
-      }
-    },
-    update: {
-      outboxEventId: input.outboxEventId ?? null,
-      status: input.status ?? 'CONSUMED',
-      result: input.result,
-      errorMessage: input.errorMessage ?? null,
-      consumedAt: new Date()
-    },
-    create: {
+  return prisma.orm.public.EventConsumption.upsert({ create: {
       consumerName: input.consumerName,
       eventId: input.eventId,
       outboxEventId: input.outboxEventId ?? null,
       status: input.status ?? 'CONSUMED',
-      result: input.result,
+      result: input.result ?? null,
       errorMessage: input.errorMessage ?? null
-    }
-  });
+    }, update: {
+      outboxEventId: input.outboxEventId ?? null,
+      status: input.status ?? 'CONSUMED',
+      result: input.result ?? null,
+      errorMessage: input.errorMessage ?? null,
+      consumedAt: new Date()
+    }, conflictOn: {
+      consumerName_eventId: {
+        consumerName: input.consumerName,
+        eventId: input.eventId
+      }
+    } });
 }

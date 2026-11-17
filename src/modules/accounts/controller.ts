@@ -1,4 +1,5 @@
 ﻿import { Request, Response } from 'express';
+import { qw } from '../../utils/where';
 import { prisma } from '../../config/database';
 import { ok } from '../../utils/response';
 import * as service from './service';
@@ -20,8 +21,8 @@ export async function list(req: Request, res: Response) {
     : {};
 
   const [rows, total] = await Promise.all([
-    prisma.account.findMany({ where, skip, take: limit, orderBy: { code: 'asc' } }),
-    prisma.account.count({ where })
+    prisma.orm.public.Account.where((r) => qw(r, where)).orderBy((r) => r.code.asc()).offset(skip).limit(limit).all(),
+    prisma.orm.public.Account.where((r) => qw(r, where)).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n)
   ]);
 
   ok(res, rows, { page, limit, total, pages: Math.max(1, Math.ceil(total / limit)) });
@@ -34,7 +35,7 @@ export async function create(req: Request, res: Response) {
 
 export async function getOne(req: Request, res: Response) {
   const id = Number(req.params.id);
-  const account = await prisma.account.findUnique({ where: { id } });
+  const account = await prisma.orm.public.Account.first({ id });
   ok(res, account);
 }
 
@@ -46,13 +47,13 @@ export async function update(req: Request, res: Response) {
 
 export async function remove(req: Request, res: Response) {
   const id = Number(req.params.id);
-  const used = await prisma.journalLine.count({ where: { accountId: id } });
+  const used = await prisma.orm.public.JournalLine.where((r) => qw(r, { accountId: id })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n);
   if (used > 0) {
-    await prisma.account.update({ where: { id }, data: { isActive: false } });
+    await prisma.orm.public.Account.where((r) => qw(r, { id })).update({ isActive: false }).then((r0) => r0!);
     ok(res, { id, deactivated: true });
     return;
   }
-  await prisma.account.delete({ where: { id } });
+  await prisma.orm.public.Account.where((r) => qw(r, { id })).delete().then((r0) => r0!);
   ok(res, { id, deleted: true });
 }
 

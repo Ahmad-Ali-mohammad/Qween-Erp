@@ -1,3 +1,4 @@
+import { qw } from '../../utils/where';
 import { Prisma } from '@prisma/client';
 import { prisma } from '../../config/database';
 import { buildSequentialNumberFromLatest } from '../../utils/id-generator';
@@ -22,9 +23,8 @@ export async function runDepreciation(input: DepreciationRunInput) {
   if (!Number.isInteger(fiscalYear) || fiscalYear <= 0) throw Errors.validation('fiscalYear غير صالح');
   if (!Number.isInteger(period) || period < 1 || period > 12) throw Errors.validation('period غير صالح');
 
-  return prisma.$transaction(async (tx) => {
-    const postingPeriod = await tx.accountingPeriod.findFirst({
-      where: {
+  return prisma.transaction(async (tx) => {{
+    const postingPeriod = await tx.orm.public.AccountingPeriod.include('fiscalYear').orderBy([(r) => r.fiscalYearId.desc(), (r) => r.id.desc()]).first((r) => qw(r, {
         number: period,
         status: 'OPEN',
         canPost: true,
@@ -35,18 +35,12 @@ export async function runDepreciation(input: DepreciationRunInput) {
             lt: new Date(Date.UTC(fiscalYear + 1, 0, 1))
           }
         }
-      },
-      include: { fiscalYear: true },
-      orderBy: [{ fiscalYearId: 'desc' }, { id: 'desc' }]
-    });
+      }));
 
     if (!postingPeriod) throw Errors.business('لا توجد فترة محاسبية مفتوحة لفترة الإهلاك المطلوبة');
 
     const reference = `DEP-${fiscalYear}-${String(period).padStart(2, '0')}`;
-    const existing = await tx.journalEntry.findFirst({
-      where: { reference, status: 'POSTED' },
-      orderBy: { id: 'desc' }
-    });
+    const existing = await tx.orm.public.JournalEntry.orderBy((r) => r.id.desc()).first({ reference, status: 'POSTED' });
 
     if (existing) {
       return {
@@ -67,10 +61,7 @@ export async function runDepreciation(input: DepreciationRunInput) {
     }
 
     const postingAccounts = await resolvePostingAccounts(tx as any);
-    const assets = await tx.fixedAsset.findMany({
-      where: { isDepreciating: true, status: 'ACTIVE' },
-      include: { category: true }
-    });
+    const assets = await tx.orm.public.FixedAsset.where((r) => qw(r, { isDepreciating: true, status: 'ACTIVE' })).include('category').all();
 
     const lineAccumulator = new Map<number, { debit: number; credit: number; description: string }>();
     const results: Array<Record<string, unknown>> = [];
@@ -81,9 +72,7 @@ export async function runDepreciation(input: DepreciationRunInput) {
 
     for (const asset of assets) {
       try {
-        const exists = await tx.depreciationSchedule.findUnique({
-          where: { assetId_fiscalYear_period: { assetId: asset.id, fiscalYear, period } }
-        });
+        const exists = await tx.orm.public.DepreciationSchedule.first((r) => qw(r, { assetId_fiscalYear_period: { assetId: asset.id, fiscalYear, period } }));
 
         if (exists) {
           skippedSchedules += 1;
@@ -114,8 +103,7 @@ export async function runDepreciation(input: DepreciationRunInput) {
         const accumulated = roundAmount(Number(asset.accumulatedDepreciation) + expense);
         const closing = roundAmount(Math.max(0, opening - expense));
 
-        await tx.depreciationSchedule.create({
-          data: {
+        await tx.orm.public.DepreciationSchedule.create({
             assetId: asset.id,
             fiscalYear,
             period,
@@ -124,17 +112,13 @@ export async function runDepreciation(input: DepreciationRunInput) {
             accumulated,
             closingNBV: closing,
             status: 'POSTED'
-          }
-        });
+          });
 
-        await tx.fixedAsset.update({
-          where: { id: asset.id },
-          data: {
+        await tx.orm.public.FixedAsset.where((r) => qw(r, { id: asset.id })).update({
             accumulatedDepreciation: accumulated,
             netBookValue: closing,
             lastDepreciationDate: postingPeriod.endDate
-          }
-        });
+          }).then((r0) => r0!);
 
         const expenseAccountId = Number(asset.category.glExpenseId ?? postingAccounts.purchaseExpenseAccountId);
         const accumulatedAccountId = Number(asset.category.glAccumulatedId ?? postingAccounts.payableAccountId);
@@ -178,14 +162,9 @@ export async function runDepreciation(input: DepreciationRunInput) {
     let journalEntryNumber: string | null = null;
     if (entryLines.length > 0) {
       const year = postingPeriod.endDate.getUTCFullYear();
-      const latest = await tx.journalEntry.findFirst({
-        where: { entryNumber: { startsWith: `DEP-${year}-` } },
-        select: { entryNumber: true },
-        orderBy: { entryNumber: 'desc' }
-      });
+      const latest = await tx.orm.public.JournalEntry.select('entryNumber').orderBy((r) => r.entryNumber.desc()).first((r) => qw(r, { entryNumber: { startsWith: `DEP-${year}-` } }));
       const entryNumber = buildSequentialNumberFromLatest('DEP', latest?.entryNumber, year);
-      const entry = await tx.journalEntry.create({
-        data: {
+      const entry = await tx.orm.public.JournalEntry.create({
           entryNumber,
           date: postingPeriod.endDate,
           periodId: postingPeriod.id,
@@ -207,11 +186,10 @@ export async function runDepreciation(input: DepreciationRunInput) {
               description: line.description
             }))
           }
-        }
-      });
+        });
 
       await applyLedgerLines(
-        tx as unknown as Prisma.TransactionClient,
+        tx as unknown as any,
         postingPeriod.endDate,
         postingPeriod.number,
         entryLines.map((line) => ({
@@ -240,8 +218,5 @@ export async function runDepreciation(input: DepreciationRunInput) {
       },
       results
     };
-  }, {
-    maxWait: 10000,
-    timeout: 60000
-  });
+  }});
 }

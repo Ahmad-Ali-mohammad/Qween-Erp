@@ -1,4 +1,5 @@
 ﻿import { Router } from 'express';
+import { qw } from '../../utils/where';
 import { z } from 'zod';
 import { prisma } from '../../config/database';
 import { authenticate } from '../../middleware/auth';
@@ -38,56 +39,48 @@ const router = Router();
 router.use(authenticate);
 
 router.get('/', requirePermissions(PERMISSIONS.PAYMENT_READ), async (_req, res) => {
-  const rows = await prisma.bankAccount.findMany({ include: { glAccount: true }, orderBy: { id: 'desc' } });
+  const rows = await prisma.orm.public.BankAccount.include('glAccount').orderBy((r) => r.id.desc()).all();
   ok(res, rows);
 });
 
 router.post('/', requirePermissions(PERMISSIONS.PAYMENT_WRITE), validateBody(bankSchema), audit('bank_accounts'), async (req, res) => {
-  const row = await prisma.bankAccount.create({ data: req.body });
+  const row = await prisma.orm.public.BankAccount.create(req.body);
   ok(res, row, undefined, 201);
 });
 
 router.get('/:id', requirePermissions(PERMISSIONS.PAYMENT_READ), async (req, res) => {
-  const row = await prisma.bankAccount.findUnique({
-    where: { id: Number(req.params.id) },
-    include: { transactions: { take: 20, orderBy: { date: 'desc' } } }
-  });
+  const row = await prisma.orm.public.BankAccount.include('transactions', (inc) => inc.limit(20).orderBy((r) => r.date.desc())).first((r) => qw(r, { id: Number(req.params.id) }));
   ok(res, row);
 });
 
 router.put('/:id', requirePermissions(PERMISSIONS.PAYMENT_WRITE), validateBody(bankSchema.partial()), audit('bank_accounts'), async (req, res) => {
-  const row = await prisma.bankAccount.update({ where: { id: Number(req.params.id) }, data: req.body });
+  const row = await prisma.orm.public.BankAccount.where((r) => qw(r, { id: Number(req.params.id) })).update(req.body).then((r0) => r0!);
   ok(res, row);
 });
 
 router.delete('/:id', requirePermissions(PERMISSIONS.PAYMENT_WRITE), audit('bank_accounts'), async (req, res) => {
-  await prisma.bankAccount.delete({ where: { id: Number(req.params.id) } });
+  await prisma.orm.public.BankAccount.where((r) => qw(r, { id: Number(req.params.id) })).delete().then((r0) => r0!);
   ok(res, { deleted: true });
 });
 
 router.get('/transactions/all', requirePermissions(PERMISSIONS.PAYMENT_READ), async (_req, res) => {
-  const rows = await prisma.bankTransaction.findMany({ include: { bank: true }, orderBy: [{ date: 'desc' }, { id: 'desc' }] });
+  const rows = await prisma.orm.public.BankTransaction.include('bank').orderBy([(r) => r.date.desc(), (r) => r.id.desc()]).all();
   ok(res, rows);
 });
 
 router.post('/transactions', requirePermissions(PERMISSIONS.PAYMENT_WRITE), validateBody(bankTxnSchema), audit('bank_transactions'), async (req, res) => {
-  const row = await prisma.bankTransaction.create({
-    data: {
+  const row = await prisma.orm.public.BankTransaction.create({
       ...req.body,
       date: new Date(req.body.date),
       valueDate: req.body.valueDate ? new Date(req.body.valueDate) : null,
       debit: req.body.debit ?? 0,
       credit: req.body.credit ?? 0
-    }
-  });
+    });
   ok(res, row, undefined, 201);
 });
 
 router.post('/transactions/:id/reconcile', requirePermissions(PERMISSIONS.PAYMENT_WRITE), audit('bank_transactions'), async (req, res) => {
-  const row = await prisma.bankTransaction.update({
-    where: { id: Number(req.params.id) },
-    data: { isReconciled: true, reconciledAt: new Date() }
-  });
+  const row = await prisma.orm.public.BankTransaction.where((r) => qw(r, { id: Number(req.params.id) })).update({ isReconciled: true, reconciledAt: new Date() }).then((r0) => r0!);
   ok(res, row);
 });
 
