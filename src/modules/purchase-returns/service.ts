@@ -1,3 +1,4 @@
+import { qw } from '../../utils/where';
 import { prisma } from '../../config/database';
 import { buildSequentialNumber, buildSequentialNumberFromLatest } from '../../utils/id-generator';
 import { Errors } from '../../utils/response';
@@ -108,7 +109,7 @@ async function createJournalForPurchaseReturn(tx: any, purchaseReturn: any, user
 }
 
 export async function createPurchaseReturn(data: any) {
-  const invoice = await prisma.invoice.findUnique({ where: { id: Number(data.invoiceId) } });
+  const invoice = await prisma.orm.public.Invoice.first((r) => qw(r, { id: Number(data.invoiceId) }));
   if (!invoice) throw Errors.notFound('الفاتورة غير موجودة');
   if (invoice.type !== 'PURCHASE') throw Errors.business('يمكن إرجاع فواتير الشراء فقط');
   if (invoice.status !== 'ISSUED') throw Errors.business('يمكن إرجاع فواتير شراء صادرة فقط');
@@ -140,7 +141,7 @@ export async function approvePurchaseReturn(id: number, userId: number) {
   if (!current) throw Errors.notFound('مرتجع الشراء غير موجود');
   if (current.status !== 'DRAFT') throw Errors.business('يمكن اعتماد مسودة مرتجع الشراء فقط');
 
-  return prisma.$transaction(async (tx) => {
+  return prisma.transaction(async (tx) => {{
     const approved = await (tx as any).purchaseReturn.update({
       where: { id },
       data: { status: 'APPROVED' }
@@ -148,21 +149,18 @@ export async function approvePurchaseReturn(id: number, userId: number) {
     const entry = await createJournalForPurchaseReturn(tx, approved, userId);
 
     if (approved.invoiceId) {
-      const invoice = await tx.invoice.findUnique({ where: { id: approved.invoiceId } });
+      const invoice = await tx.orm.public.Invoice.first({ id: approved.invoiceId });
       if (invoice) {
         const paidAmount = Number(invoice.paidAmount) + Number(approved.total);
         const outstanding = Math.max(0, Number(invoice.outstanding) - Number(approved.total));
         const status = outstanding <= 0.01 ? 'PAID' : paidAmount > 0 ? 'PARTIAL' : invoice.status;
         const paymentStatus = outstanding <= 0.01 ? 'PAID' : paidAmount > 0 ? 'PARTIAL' : 'PENDING';
-        await tx.invoice.update({
-          where: { id: invoice.id },
-          data: {
+        await tx.orm.public.Invoice.where((r) => qw(r, { id: invoice.id })).update({
             paidAmount,
             outstanding,
             status,
             paymentStatus
-          }
-        });
+          }).then((r0) => r0!);
       }
     }
 
@@ -172,7 +170,7 @@ export async function approvePurchaseReturn(id: number, userId: number) {
     });
 
     return approved;
-  });
+  }});
 }
 
 export async function listPurchaseReturns(query: any) {

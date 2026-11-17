@@ -1,20 +1,13 @@
-﻿import dotenv from 'dotenv';
+import dotenv from 'dotenv';
+import service from '../service.mjs';
 
 dotenv.config();
 
-function requireEnv(name: string, fallback?: string): string {
-  const value = process.env[name] ?? fallback;
-  if (!value) {
-    throw new Error(`Missing required env var: ${name}`);
-  }
-  return value;
-}
+const { jwtSecret } = service.input();
 
 export const env = {
-  port: Number(process.env.PORT ?? 3000),
   nodeEnv: process.env.NODE_ENV ?? 'development',
-  databaseUrl: requireEnv('DATABASE_URL', 'postgresql://erp_user:erp_pass@localhost:5432/erp_qween?schema=public'),
-  jwtSecret: requireEnv('JWT_SECRET', 'change-me'),
+  jwtSecret: jwtSecret.expose(),
   jwtExpire: process.env.JWT_EXPIRE ?? '24h',
   jwtRefreshExpire: process.env.JWT_REFRESH_EXPIRE ?? '7d',
   bcryptRounds: Number(process.env.BCRYPT_ROUNDS ?? 12),

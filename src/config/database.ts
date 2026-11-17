@@ -1,28 +1,29 @@
-import { PrismaClient } from '@prisma/client';
+import service from '../service.mjs';
+import type { Contract } from '../prisma/contract.js';
+import type { PostgresTransactionContext } from '@prisma/orm-postgres/runtime';
 import { logger } from './logger';
 
-export const prisma = new PrismaClient({
-  log: process.env.NODE_ENV === 'development' ? ['query', 'warn', 'error'] : ['error']
-});
+const { db } = service.load();
+
+export const prisma = db.client;
+
+/** The transaction context passed to `prisma.transaction(...)` callbacks. */
+export type Tx = PostgresTransactionContext<Contract>;
+/** Anything that can execute ORM queries: the plain client or a transaction context. */
+export type Executor = Tx | typeof prisma;
 
 async function verifyConnection(): Promise<void> {
-  await prisma.$queryRawUnsafe('SELECT 1');
+  await prisma.execute(prisma.raw.sql`SELECT 1`.affectedCount().build());
 }
 
 export async function connectWithRetry(maxRetries = 5): Promise<void> {
   for (let i = 1; i <= maxRetries; i += 1) {
     try {
-      await prisma.$connect();
       await verifyConnection();
       logger.info('Database connected');
       return;
     } catch (error) {
       logger.error(`Database connection attempt ${i} failed`, { error });
-      try {
-        await prisma.$disconnect();
-      } catch {
-        // ignore disconnect errors between retries
-      }
       if (i === maxRetries) throw error;
       await new Promise((resolve) => setTimeout(resolve, i * 1000));
     }
@@ -30,5 +31,5 @@ export async function connectWithRetry(maxRetries = 5): Promise<void> {
 }
 
 export async function disconnectDb(): Promise<void> {
-  await prisma.$disconnect();
+  await prisma.close();
 }

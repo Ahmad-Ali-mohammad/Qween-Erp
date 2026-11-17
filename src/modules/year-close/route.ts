@@ -1,3 +1,4 @@
+import { qw } from '../../utils/where';
 import { Router, Request, Response } from 'express';
 import { z } from 'zod';
 import { prisma } from '../../config/database';
@@ -30,18 +31,14 @@ router.use(authenticate);
 router.get('/year-close/check', requirePermissions(PERMISSIONS.FISCAL_READ), async (req: Request, res: Response) => {
   const fiscalYear = Number(req.query.fiscalYear ?? new Date().getUTCFullYear());
   const [draftEntries, openPeriods] = await Promise.all([
-    prisma.journalEntry.count({
-      where: {
+    prisma.orm.public.JournalEntry.where((r) => qw(r, {
         status: 'DRAFT',
         date: { gte: new Date(Date.UTC(fiscalYear, 0, 1)), lt: new Date(Date.UTC(fiscalYear + 1, 0, 1)) }
-      }
-    }),
-    prisma.accountingPeriod.count({
-      where: {
+      })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n),
+    prisma.orm.public.AccountingPeriod.where((r) => qw(r, {
         fiscalYear: { startDate: { gte: new Date(Date.UTC(fiscalYear, 0, 1)), lt: new Date(Date.UTC(fiscalYear + 1, 0, 1)) } },
         status: 'OPEN'
-      }
-    })
+      })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n)
   ]);
 
   ok(res, { fiscalYear, draftEntries, openPeriods, canClose: draftEntries === 0 && openPeriods === 0 });

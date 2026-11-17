@@ -1,3 +1,4 @@
+import { qw } from '../../utils/where';
 import { prisma } from '../../config/database';
 import { buildSequentialNumber, buildSequentialNumberFromLatest } from '../../utils/id-generator';
 import { Errors } from '../../utils/response';
@@ -6,14 +7,12 @@ import { resolvePostingAccounts } from '../shared/posting-accounts';
 
 async function generateReturnNumber(): Promise<string> {
   const year = new Date().getUTCFullYear();
-  const count = await prisma.salesReturn.count({
-    where: {
+  const count = await prisma.orm.public.SalesReturn.where((r) => qw(r, {
       date: {
         gte: new Date(Date.UTC(year, 0, 1)),
         lt: new Date(Date.UTC(year + 1, 0, 1))
       }
-    }
-  });
+    })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n);
   return buildSequentialNumber('RTN', count, year);
 }
 
@@ -118,10 +117,7 @@ async function createJournalForReturn(tx: any, returnDoc: any, userId: number) {
 }
 
 export async function createSalesReturn(data: any, userId: number) {
-  const invoice = await prisma.invoice.findUnique({
-    where: { id: Number(data.invoiceId) },
-    include: { customer: true }
-  });
+  const invoice = await prisma.orm.public.Invoice.include('customer').first((r) => qw(r, { id: Number(data.invoiceId) }));
   if (!invoice) throw Errors.notFound('الفاتورة غير موجودة');
   if (invoice.type !== 'SALES') throw Errors.business('يمكن إرجاع فواتير المبيعات فقط');
   if (invoice.status !== 'ISSUED') throw Errors.business('لا يمكن إرجاع فاتورة غير صادرة');
@@ -132,8 +128,7 @@ export async function createSalesReturn(data: any, userId: number) {
   }
 
   const number = await generateReturnNumber();
-  return prisma.salesReturn.create({
-    data: {
+  return prisma.orm.public.SalesReturn.create({
       number,
       invoiceId: invoice.id,
       customerId: invoice.customerId,
@@ -143,39 +138,32 @@ export async function createSalesReturn(data: any, userId: number) {
       total: calc.total,
       reason: data.reason,
       lines: calc.mapped
-    }
-  });
+    });
 }
 
 export async function approveSalesReturn(id: number, userId: number) {
-  const returnDoc = await prisma.salesReturn.findUnique({ where: { id } });
+  const returnDoc = await prisma.orm.public.SalesReturn.first({ id });
   if (!returnDoc) throw Errors.notFound('المرتجع غير موجود');
   if (returnDoc.status !== 'DRAFT') throw Errors.business('يمكن اعتماد المسودة فقط');
 
-  return prisma.$transaction(async (tx) => {
-    const approved = await tx.salesReturn.update({
-      where: { id },
-      data: { status: 'APPROVED' }
-    });
+  return prisma.transaction(async (tx) => {{
+    const approved = await tx.orm.public.SalesReturn.where((r) => qw(r, { id })).update({ status: 'APPROVED' }).then((r0) => r0!);
 
     await createJournalForReturn(tx, approved, userId);
 
     if (approved.invoiceId) {
-      const invoice = await tx.invoice.findUnique({ where: { id: approved.invoiceId } });
+      const invoice = await tx.orm.public.Invoice.first({ id: approved.invoiceId });
       if (invoice) {
         const paidAmount = Number(invoice.paidAmount) + Number(approved.total);
         const outstanding = Math.max(0, Number(invoice.outstanding) - Number(approved.total));
         const status = outstanding <= 0.01 ? 'PAID' : paidAmount > 0 ? 'PARTIAL' : invoice.status;
         const paymentStatus = outstanding <= 0.01 ? 'PAID' : paidAmount > 0 ? 'PARTIAL' : 'PENDING';
-        await tx.invoice.update({
-          where: { id: invoice.id },
-          data: { paidAmount, outstanding, status, paymentStatus }
-        });
+        await tx.orm.public.Invoice.where((r) => qw(r, { id: invoice.id })).update({ paidAmount, outstanding, status, paymentStatus }).then((r0) => r0!);
       }
     }
 
     return approved;
-  });
+  }});
 }
 
 export async function listSalesReturns(query: any) {
@@ -189,13 +177,8 @@ export async function listSalesReturns(query: any) {
   if (query.status) where.status = query.status;
 
   const [rows, total] = await Promise.all([
-    prisma.salesReturn.findMany({
-      where,
-      skip,
-      take: limit,
-      orderBy: [{ date: 'desc' }]
-    }),
-    prisma.salesReturn.count({ where })
+    prisma.orm.public.SalesReturn.where((r) => qw(r, where)).orderBy([(r) => r.date.desc()]).offset(skip).limit(limit).all(),
+    prisma.orm.public.SalesReturn.where((r) => qw(r, where)).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n)
   ]);
 
   return {
@@ -210,16 +193,16 @@ export async function listSalesReturns(query: any) {
 }
 
 export async function getSalesReturn(id: number) {
-  const returnDoc = await prisma.salesReturn.findUnique({ where: { id } });
+  const returnDoc = await prisma.orm.public.SalesReturn.first({ id });
   if (!returnDoc) throw Errors.notFound('المرتجع غير موجود');
   return returnDoc;
 }
 
 export async function deleteSalesReturn(id: number) {
-  const returnDoc = await prisma.salesReturn.findUnique({ where: { id } });
+  const returnDoc = await prisma.orm.public.SalesReturn.first({ id });
   if (!returnDoc) throw Errors.notFound('المرتجع غير موجود');
   if (returnDoc.status !== 'DRAFT') throw Errors.business('يمكن حذف المسودة فقط');
 
-  await prisma.salesReturn.delete({ where: { id } });
+  await prisma.orm.public.SalesReturn.where((r) => qw(r, { id })).delete().then((r0) => r0!);
   return { deleted: true, id };
 }

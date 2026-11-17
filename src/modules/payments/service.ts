@@ -1,3 +1,4 @@
+import { qw } from '../../utils/where';
 import { prisma } from '../../config/database';
 import { enqueueOutboxEvent } from '../../platform/events/outbox';
 import { parseDateOrThrow } from '../../utils/date';
@@ -8,12 +9,10 @@ import { resolvePostingAccounts } from '../shared/posting-accounts';
 
 async function generateNumber(type: 'RECEIPT' | 'PAYMENT') {
   const year = new Date().getUTCFullYear();
-  const count = await prisma.payment.count({
-    where: {
+  const count = await prisma.orm.public.Payment.where((r) => qw(r, {
       type,
       date: { gte: new Date(Date.UTC(year, 0, 1)), lt: new Date(Date.UTC(year + 1, 0, 1)) }
-    }
-  });
+    })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n);
   return buildSequentialNumber(type === 'RECEIPT' ? 'RCV' : 'PAY', count, year);
 }
 
@@ -147,9 +146,8 @@ export async function createPayment(data: any, userId: number) {
     throw Errors.business('إجمالي التوزيع يتجاوز مبلغ السند');
   }
 
-  return prisma.$transaction(async (tx) => {
-    const payment = await tx.payment.create({
-      data: {
+  return prisma.transaction(async (tx) => {{
+    const payment = await tx.orm.public.Payment.create({
         number,
         date: parseDateOrThrow(data.date),
         type: data.type,
@@ -168,17 +166,14 @@ export async function createPayment(data: any, userId: number) {
         approvalStatus: 'PENDING',
         postingStatus: 'UNPOSTED',
         createdById: userId
-      }
-    });
+      });
 
     if (allocations.length) {
-      await tx.paymentAllocation.createMany({
-        data: allocations.map((allocation) => ({
+      await tx.orm.public.PaymentAllocation.createAll(allocations.map((allocation) => ({
           paymentId: payment.id,
           invoiceId: allocation.invoiceId,
           amount: allocation.amount
-        }))
-      });
+        }))).then((rows) => ({ count: rows.length }));
     }
 
     await enqueueOutboxEvent(tx, {
@@ -199,22 +194,19 @@ export async function createPayment(data: any, userId: number) {
       }
     });
 
-    return tx.payment.findUnique({
-      where: { id: payment.id },
-      include: { allocations: { include: { invoice: true } } }
-    });
-  });
+    return tx.orm.public.Payment.include('allocations', (inc) => inc.include('invoice')).first({ id: payment.id });
+  }});
 }
 
 export async function completePayment(id: number, userId: number, allocations: Array<{ invoiceId: number; amount: number }> = []) {
-  return prisma.$transaction(async (tx) => {
-    const payment = await tx.payment.findUnique({ where: { id } });
+  return prisma.transaction(async (tx) => {{
+    const payment = await tx.orm.public.Payment.first({ id });
     if (!payment) throw Errors.notFound('السند غير موجود');
     if (payment.status !== 'PENDING') throw Errors.business('يمكن إكمال السند المعلق فقط');
 
     let effectiveAllocations = allocations;
     if (!effectiveAllocations.length) {
-      const saved = await tx.paymentAllocation.findMany({ where: { paymentId: payment.id } });
+      const saved = await tx.orm.public.PaymentAllocation.where((r) => qw(r, { paymentId: payment.id })).all();
       effectiveAllocations = saved.map((row: any) => ({ invoiceId: row.invoiceId, amount: Number(row.amount) }));
     }
 
@@ -227,16 +219,12 @@ export async function completePayment(id: number, userId: number, allocations: A
     await applyAllocations(tx, payment.id, normalizedAllocations);
     const entry = await createJournalForPayment(tx, payment, userId);
 
-    const completed = await tx.payment.update({
-      where: { id },
-      data: {
+    const completed = await tx.orm.public.Payment.where((r) => qw(r, { id })).include('allocations').update({
         status: 'COMPLETED',
         approvalStatus: 'APPROVED',
         postingStatus: 'POSTED',
         journalEntryId: entry.id
-      },
-      include: { allocations: true }
-    });
+      }).then((r0) => r0!);
 
     await enqueueOutboxEvent(tx, {
       eventType: 'finance.payment.completed',
@@ -256,25 +244,22 @@ export async function completePayment(id: number, userId: number, allocations: A
     });
 
     return completed;
-  }, { maxWait: 10000, timeout: 60000 });
+  }});
 }
 
 export async function cancelPayment(id: number, reason?: string) {
-  const payment = await prisma.payment.findUnique({ where: { id } });
+  const payment = await prisma.orm.public.Payment.first({ id });
   if (!payment) throw Errors.notFound('السند غير موجود');
   if (payment.status === 'COMPLETED') throw Errors.business('لا يمكن إلغاء سند مكتمل');
 
-  return prisma.payment.update({
-    where: { id },
-    data: {
+  return prisma.orm.public.Payment.where((r) => qw(r, { id })).update({
       status: 'CANCELLED',
       notes: reason ? `${payment.notes ?? ''}\nإلغاء: ${reason}`.trim() : payment.notes
-    }
-  });
+    }).then((r0) => r0!);
 }
 
 export async function updatePayment(id: number, data: any) {
-  const current = await prisma.payment.findUnique({ where: { id } });
+  const current = await prisma.orm.public.Payment.first({ id });
   if (!current) throw Errors.notFound('السند غير موجود');
   if (current.status !== 'PENDING') throw Errors.business('يمكن تعديل السند المعلق فقط');
 
@@ -287,43 +272,35 @@ export async function updatePayment(id: number, data: any) {
     }
   }
 
-  return prisma.$transaction(async (tx) => {
-    const updated = await tx.payment.update({
-      where: { id },
-      data: {
+  return prisma.transaction(async (tx) => {{
+    const updated = await tx.orm.public.Payment.where((r) => qw(r, { id })).update({
         ...data,
         allocations: undefined,
         branchId: data.branchId ?? current.branchId,
         date: data.date ? parseDateOrThrow(data.date) : current.date,
         checkDate: data.checkDate ? parseDateOrThrow(data.checkDate, 'checkDate') : current.checkDate
-      }
-    });
+      }).then((r0) => r0!);
 
     if (allocations) {
-      await tx.paymentAllocation.deleteMany({ where: { paymentId: id } });
+      await tx.orm.public.PaymentAllocation.where((r) => qw(r, { paymentId: id })).deleteAndCount().then((n0) => ({ count: n0 }));
       if (allocations.length) {
-        await tx.paymentAllocation.createMany({
-          data: allocations.map((allocation) => ({
+        await tx.orm.public.PaymentAllocation.createAll(allocations.map((allocation) => ({
             paymentId: id,
             invoiceId: allocation.invoiceId,
             amount: allocation.amount
-          }))
-        });
+          }))).then((rows) => ({ count: rows.length }));
       }
     }
 
-    return tx.payment.findUnique({
-      where: { id: updated.id },
-      include: { allocations: { include: { invoice: true } } }
-    });
-  });
+    return tx.orm.public.Payment.include('allocations', (inc) => inc.include('invoice')).first({ id: updated.id });
+  }});
 }
 
 export async function deletePayment(id: number) {
-  const current = await prisma.payment.findUnique({ where: { id } });
+  const current = await prisma.orm.public.Payment.first({ id });
   if (!current) throw Errors.notFound('السند غير موجود');
   if (current.status !== 'PENDING') throw Errors.business('يمكن حذف السند المعلق فقط');
-  await prisma.payment.delete({ where: { id } });
+  await prisma.orm.public.Payment.where((r) => qw(r, { id })).delete().then((r0) => r0!);
   return { deleted: true, id };
 }
 
@@ -338,14 +315,8 @@ export async function listPayments(query: any) {
   if (query.branchId) where.branchId = Number(query.branchId);
 
   const [rows, total] = await Promise.all([
-    prisma.payment.findMany({
-      where,
-      skip,
-      take: limit,
-      include: { customer: true, supplier: true, bank: true, allocations: { include: { invoice: true } }, createdBy: true },
-      orderBy: [{ date: 'desc' }, { id: 'desc' }]
-    }),
-    prisma.payment.count({ where })
+    prisma.orm.public.Payment.where((r) => qw(r, where)).include('customer').include('supplier').include('bank').include('allocations', (inc) => inc.include('invoice')).include('createdBy').orderBy([(r) => r.date.desc(), (r) => r.id.desc()]).offset(skip).limit(limit).all(),
+    prisma.orm.public.Payment.where((r) => qw(r, where)).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n)
   ]);
 
   return {

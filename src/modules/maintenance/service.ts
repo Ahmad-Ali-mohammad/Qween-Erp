@@ -1,3 +1,4 @@
+import { qw } from '../../utils/where';
 import { prisma } from '../../config/database';
 import { enqueueOutboxEvent } from '../../platform/events/outbox';
 import { buildSequentialNumberFromLatest } from '../../utils/id-generator';
@@ -245,26 +246,25 @@ export async function listPlans(query: any) {
   if (query.status) where.status = String(query.status);
 
   const [rows, total] = await Promise.all([
-    prisma.maintenancePlan.findMany({ where, skip: page.skip, take: page.limit, orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }] }),
-    prisma.maintenancePlan.count({ where })
+    prisma.orm.public.MaintenancePlan.where((r) => qw(r, where)).orderBy([(r) => r.updatedAt.desc(), (r) => r.id.desc()]).offset(page.skip).limit(page.limit).all(),
+    prisma.orm.public.MaintenancePlan.where((r) => qw(r, where)).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n)
   ]);
 
   return {
-    rows: await prisma.$transaction((tx) => enrichPlanRows(tx, rows)),
+    rows: await prisma.transaction(async (tx) => enrichPlanRows(tx, rows)),
     meta: { page: page.page, limit: page.limit, total, pages: Math.max(1, Math.ceil(total / page.limit)) }
   };
 }
 
 export async function createPlan(data: any, userId: number) {
-  return prisma.$transaction(async (tx) => {
+  return prisma.transaction(async (tx) => {{
     const assetId = toPositiveInt(data.assetId, 'assetId', true);
     const projectId = toPositiveInt(data.projectId, 'projectId', true);
     const asset = await ensureAsset(tx, assetId);
     const project = await ensureProject(tx, projectId);
     const branchId = toPositiveInt(data.branchId ?? asset?.branchId ?? project?.branchId, 'branchId', true);
 
-    const row = await tx.maintenancePlan.create({
-      data: {
+    const row = await tx.orm.public.MaintenancePlan.create({
         code: data.code ?? (await generateNumber(tx, 'maintenancePlan', 'MNP', true)),
         branchId,
         assetId,
@@ -280,8 +280,7 @@ export async function createPlan(data: any, userId: number) {
         notes: toText(data.notes),
         createdById: userId,
         updatedById: userId
-      }
-    });
+      });
 
     await enqueueOutboxEvent(tx, {
       eventType: 'maintenance.plan.created',
@@ -293,7 +292,7 @@ export async function createPlan(data: any, userId: number) {
     });
 
     return fetchPlan(tx, row.id);
-  });
+  }});
 }
 
 export async function listOrders(query: any) {
@@ -307,18 +306,18 @@ export async function listOrders(query: any) {
   Object.assign(where, buildDateRange(query, 'dueDate'));
 
   const [rows, total] = await Promise.all([
-    prisma.maintenanceOrder.findMany({ where, skip: page.skip, take: page.limit, orderBy: [{ dueDate: 'asc' }, { id: 'desc' }] }),
-    prisma.maintenanceOrder.count({ where })
+    prisma.orm.public.MaintenanceOrder.where((r) => qw(r, where)).orderBy([(r) => r.dueDate.asc(), (r) => r.id.desc()]).offset(page.skip).limit(page.limit).all(),
+    prisma.orm.public.MaintenanceOrder.where((r) => qw(r, where)).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n)
   ]);
 
   return {
-    rows: await prisma.$transaction((tx) => enrichOrderRows(tx, rows)),
+    rows: await prisma.transaction(async (tx) => enrichOrderRows(tx, rows)),
     meta: { page: page.page, limit: page.limit, total, pages: Math.max(1, Math.ceil(total / page.limit)) }
   };
 }
 
 export async function createOrder(data: any, userId: number) {
-  return prisma.$transaction(async (tx) => {
+  return prisma.transaction(async (tx) => {{
     const planId = toPositiveInt(data.planId, 'planId', true);
     const plan = await ensurePlan(tx, planId);
     const assetId = toPositiveInt(data.assetId ?? plan?.assetId, 'assetId', true);
@@ -327,8 +326,7 @@ export async function createOrder(data: any, userId: number) {
     const project = await ensureProject(tx, projectId);
     const branchId = toPositiveInt(data.branchId ?? plan?.branchId ?? asset?.branchId ?? project?.branchId, 'branchId', true);
 
-    const row = await tx.maintenanceOrder.create({
-      data: {
+    const row = await tx.orm.public.MaintenanceOrder.create({
         number: data.number ?? (await generateNumber(tx, 'maintenanceOrder', 'MNO')),
         branchId,
         planId,
@@ -347,8 +345,7 @@ export async function createOrder(data: any, userId: number) {
         attachmentsCount: Number(data.attachmentsCount ?? 0),
         createdById: userId,
         updatedById: userId
-      }
-    });
+      });
 
     await enqueueOutboxEvent(tx, {
       eventType: 'maintenance.order.created',
@@ -360,24 +357,21 @@ export async function createOrder(data: any, userId: number) {
     });
 
     return fetchOrder(tx, row.id);
-  });
+  }});
 }
 
 export async function submitOrder(id: number, userId: number) {
-  return prisma.$transaction(async (tx) => {
-    const row = await tx.maintenanceOrder.findUnique({ where: { id } });
+  return prisma.transaction(async (tx) => {{
+    const row = await tx.orm.public.MaintenanceOrder.first({ id });
     if (!row) throw Errors.notFound('أمر الصيانة غير موجود');
     if (row.approvalStatus === 'APPROVED') throw Errors.business('تم اعتماد أمر الصيانة بالفعل');
 
-    await tx.maintenanceOrder.update({
-      where: { id },
-      data: {
+    await tx.orm.public.MaintenanceOrder.where((r) => qw(r, { id })).update({
         status: 'SUBMITTED',
         approvalStatus: 'PENDING',
         submittedAt: new Date(),
         updatedById: userId
-      }
-    });
+      }).then((r0) => r0!);
 
     await enqueueOutboxEvent(tx, {
       eventType: 'maintenance.order.submitted',
@@ -389,24 +383,21 @@ export async function submitOrder(id: number, userId: number) {
     });
 
     return fetchOrder(tx, id);
-  });
+  }});
 }
 
 export async function approveOrder(id: number, userId: number) {
-  return prisma.$transaction(async (tx) => {
-    const row = await tx.maintenanceOrder.findUnique({ where: { id } });
+  return prisma.transaction(async (tx) => {{
+    const row = await tx.orm.public.MaintenanceOrder.first({ id });
     if (!row) throw Errors.notFound('أمر الصيانة غير موجود');
     if (row.approvalStatus !== 'PENDING') throw Errors.business('أمر الصيانة غير جاهز للاعتماد');
 
-    await tx.maintenanceOrder.update({
-      where: { id },
-      data: {
+    await tx.orm.public.MaintenanceOrder.where((r) => qw(r, { id })).update({
         status: 'APPROVED',
         approvalStatus: 'APPROVED',
         approvedAt: new Date(),
         updatedById: userId
-      }
-    });
+      }).then((r0) => r0!);
 
     await enqueueOutboxEvent(tx, {
       eventType: 'maintenance.order.approved',
@@ -418,7 +409,7 @@ export async function approveOrder(id: number, userId: number) {
     });
 
     return fetchOrder(tx, id);
-  });
+  }});
 }
 
 export async function listExecutions(query: any) {
@@ -430,18 +421,18 @@ export async function listExecutions(query: any) {
   Object.assign(where, buildDateRange(query, 'executionDate'));
 
   const [rows, total] = await Promise.all([
-    prisma.maintenanceExecution.findMany({ where, skip: page.skip, take: page.limit, orderBy: [{ executionDate: 'desc' }, { id: 'desc' }] }),
-    prisma.maintenanceExecution.count({ where })
+    prisma.orm.public.MaintenanceExecution.where((r) => qw(r, where)).orderBy([(r) => r.executionDate.desc(), (r) => r.id.desc()]).offset(page.skip).limit(page.limit).all(),
+    prisma.orm.public.MaintenanceExecution.where((r) => qw(r, where)).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n)
   ]);
 
   return {
-    rows: await prisma.$transaction((tx) => enrichExecutionRows(tx, rows)),
+    rows: await prisma.transaction(async (tx) => enrichExecutionRows(tx, rows)),
     meta: { page: page.page, limit: page.limit, total, pages: Math.max(1, Math.ceil(total / page.limit)) }
   };
 }
 
 export async function createExecution(data: any, userId: number) {
-  return prisma.$transaction(async (tx) => {
+  return prisma.transaction(async (tx) => {{
     const orderId = toPositiveInt(data.orderId, 'orderId')!;
     const order = await ensureOrder(tx, orderId);
     if (!order) throw Errors.notFound('أمر الصيانة غير موجود');
@@ -466,8 +457,7 @@ export async function createExecution(data: any, userId: number) {
       throw Errors.business('كمية قطع الغيار المطلوبة أكبر من المتاح بالمخزون');
     }
 
-    const execution = await tx.maintenanceExecution.create({
-      data: {
+    const execution = await tx.orm.public.MaintenanceExecution.create({
         branchId,
         orderId,
         assetId,
@@ -486,12 +476,10 @@ export async function createExecution(data: any, userId: number) {
         notes: toText(data.notes),
         createdById: userId,
         updatedById: userId
-      }
-    });
+      });
 
     if (spareItemId && spareQuantity > 0) {
-      await tx.spareReservation.create({
-        data: {
+      await tx.orm.public.SpareReservation.create({
           branchId,
           orderId,
           assetId,
@@ -505,13 +493,11 @@ export async function createExecution(data: any, userId: number) {
           postingStatus: 'NOT_APPLICABLE',
           createdById: userId,
           updatedById: userId
-        }
-      });
+        });
 
       if (item && warehouse) {
         const unitCost = spareQuantity > 0 ? roundAmount(spareCost / spareQuantity) : 0;
-        await tx.stockMovement.create({
-          data: {
+        await tx.orm.public.StockMovement.create({
             type: 'ISSUE_MAINTENANCE',
             reference: order.number,
             itemId: item.id,
@@ -520,26 +506,19 @@ export async function createExecution(data: any, userId: number) {
             unitCost,
             totalCost: spareCost,
             notes: `Maintenance execution ${order.number}`
-          }
-        });
-        await tx.item.update({
-          where: { id: item.id },
-          data: {
+          });
+        await tx.orm.public.Item.where((r) => qw(r, { id: item.id })).update({
             onHandQty: { decrement: spareQuantity },
             inventoryValue: { decrement: spareCost }
-          }
-        });
+          }).then((r0) => r0!);
       }
     }
 
     const totalExecutionCost = roundAmount(laborCost + spareCost);
-    await tx.maintenanceOrder.update({
-      where: { id: orderId },
-      data: {
+    await tx.orm.public.MaintenanceOrder.where((r) => qw(r, { id: orderId })).update({
         actualCost: { increment: totalExecutionCost },
         updatedById: userId
-      }
-    });
+      }).then((r0) => r0!);
 
     await enqueueOutboxEvent(tx, {
       eventType: 'maintenance.execution.logged',
@@ -551,37 +530,31 @@ export async function createExecution(data: any, userId: number) {
     });
 
     return fetchExecution(tx, execution.id);
-  });
+  }});
 }
 
 export async function completeOrder(id: number, userId: number, data?: any) {
-  return prisma.$transaction(async (tx) => {
-    const row = await tx.maintenanceOrder.findUnique({ where: { id } });
+  return prisma.transaction(async (tx) => {{
+    const row = await tx.orm.public.MaintenanceOrder.first({ id });
     if (!row) throw Errors.notFound('أمر الصيانة غير موجود');
     if (row.status === 'COMPLETED') throw Errors.business('تم إغلاق أمر الصيانة مسبقًا');
     if (row.approvalStatus !== 'APPROVED') throw Errors.business('يجب اعتماد أمر الصيانة قبل إكماله');
 
-    const executions = await tx.maintenanceExecution.findMany({ where: { orderId: id } });
+    const executions = await tx.orm.public.MaintenanceExecution.where((r) => qw(r, { orderId: id })).all();
     const actualCost = roundAmount(executions.reduce((sum: number, item: any) => sum + Number(item.laborCost ?? 0) + Number(item.spareCost ?? 0), 0));
 
-    await tx.maintenanceOrder.update({
-      where: { id },
-      data: {
+    await tx.orm.public.MaintenanceOrder.where((r) => qw(r, { id })).update({
         status: 'COMPLETED',
         completedAt: new Date(),
         actualCost,
         updatedById: userId,
         description: toText(data?.notes) ?? row.description
-      }
-    });
+      }).then((r0) => r0!);
 
     if (row.projectId) {
-      await tx.project.update({
-        where: { id: row.projectId },
-        data: {
+      await tx.orm.public.Project.where((r) => qw(r, { id: row.projectId })).update({
           actualCost: { increment: actualCost }
-        }
-      });
+        }).then((r0) => r0!);
     }
 
     await enqueueOutboxEvent(tx, {
@@ -594,7 +567,7 @@ export async function completeOrder(id: number, userId: number, data?: any) {
     });
 
     return fetchOrder(tx, id);
-  });
+  }});
 }
 
 export async function listFailures(query: any) {
@@ -608,18 +581,18 @@ export async function listFailures(query: any) {
   Object.assign(where, buildDateRange(query, 'incidentDate'));
 
   const [rows, total] = await Promise.all([
-    prisma.failureAnalysis.findMany({ where, skip: page.skip, take: page.limit, orderBy: [{ incidentDate: 'desc' }, { id: 'desc' }] }),
-    prisma.failureAnalysis.count({ where })
+    prisma.orm.public.FailureAnalysis.where((r) => qw(r, where)).orderBy([(r) => r.incidentDate.desc(), (r) => r.id.desc()]).offset(page.skip).limit(page.limit).all(),
+    prisma.orm.public.FailureAnalysis.where((r) => qw(r, where)).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n)
   ]);
 
   return {
-    rows: await prisma.$transaction((tx) => enrichFailureRows(tx, rows)),
+    rows: await prisma.transaction(async (tx) => enrichFailureRows(tx, rows)),
     meta: { page: page.page, limit: page.limit, total, pages: Math.max(1, Math.ceil(total / page.limit)) }
   };
 }
 
 export async function createFailure(data: any, userId: number) {
-  return prisma.$transaction(async (tx) => {
+  return prisma.transaction(async (tx) => {{
     const orderId = toPositiveInt(data.orderId, 'orderId', true);
     const order = await ensureOrder(tx, orderId);
     const assetId = toPositiveInt(data.assetId ?? order?.assetId, 'assetId', true);
@@ -628,8 +601,7 @@ export async function createFailure(data: any, userId: number) {
     const project = await ensureProject(tx, projectId);
     const branchId = toPositiveInt(data.branchId ?? order?.branchId ?? asset?.branchId ?? project?.branchId, 'branchId', true);
 
-    const row = await tx.failureAnalysis.create({
-      data: {
+    const row = await tx.orm.public.FailureAnalysis.create({
         number: data.number ?? (await generateNumber(tx, 'failureAnalysis', 'MNF')),
         branchId,
         orderId,
@@ -647,8 +619,7 @@ export async function createFailure(data: any, userId: number) {
         postingStatus: 'NOT_APPLICABLE',
         createdById: userId,
         updatedById: userId
-      }
-    });
+      });
 
     await enqueueOutboxEvent(tx, {
       eventType: 'maintenance.failure.detected',
@@ -660,5 +631,5 @@ export async function createFailure(data: any, userId: number) {
     });
 
     return fetchFailure(tx, row.id);
-  });
+  }});
 }

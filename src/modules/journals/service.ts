@@ -1,4 +1,5 @@
 ﻿import { Prisma } from '@prisma/client';
+import { qw } from '../../utils/where';
 import { prisma } from '../../config/database';
 import { parseDateOrThrow } from '../../utils/date';
 import { buildSequentialNumberFromLatest } from '../../utils/id-generator';
@@ -15,10 +16,7 @@ function ensureBalanced(lines: Array<{ debit: number; credit: number }>): { debi
 }
 
 async function resolvePeriod(date: Date) {
-  const period = await prisma.accountingPeriod.findFirst({
-    where: { startDate: { lte: date }, endDate: { gte: date } },
-    include: { fiscalYear: true }
-  });
+  const period = await prisma.orm.public.AccountingPeriod.include('fiscalYear').first((r) => qw(r, { startDate: { lte: date }, endDate: { gte: date } }));
 
   if (!period) throw Errors.business('لا توجد فترة محاسبية لهذا التاريخ');
   if (period.fiscalYear.status !== 'OPEN') throw Errors.business('السنة المالية مغلقة');
@@ -29,15 +27,11 @@ async function resolvePeriod(date: Date) {
 
 async function nextEntryNumber(date: Date) {
   const year = date.getUTCFullYear();
-  const latest = await prisma.journalEntry.findFirst({
-    where: {
+  const latest = await prisma.orm.public.JournalEntry.select('entryNumber').orderBy((r) => r.entryNumber.desc()).first((r) => qw(r, {
       entryNumber: {
         startsWith: `JE-${year}-`
       }
-    },
-    select: { entryNumber: true },
-    orderBy: { entryNumber: 'desc' }
-  });
+    }));
   return buildSequentialNumberFromLatest('JE', latest?.entryNumber, year);
 }
 
@@ -47,16 +41,15 @@ export async function createEntry(data: any, userId: number) {
   const period = await resolvePeriod(date);
 
   const accountIds = data.lines.map((l: any) => l.accountId);
-  const accounts = await prisma.account.findMany({ where: { id: { in: accountIds } } });
+  const accounts = await prisma.orm.public.Account.where((r) => qw(r, { id: { in: accountIds } })).all();
   if (accounts.length !== accountIds.length) throw Errors.validation('بعض الحسابات غير موجودة');
   const blocked = accounts.filter((a) => !a.allowPosting);
   if (blocked.length) throw Errors.business(`حسابات لا تسمح بالترحيل المباشر: ${blocked.map((b) => b.code).join(', ')}`);
 
   const entryNumber = await nextEntryNumber(date);
 
-  return prisma.$transaction(async (tx) => {
-    const entry = await tx.journalEntry.create({
-      data: {
+  return prisma.transaction(async (tx) => {{
+    const entry = await tx.orm.public.JournalEntry.create({
         entryNumber,
         date,
         periodId: period.id,
@@ -67,11 +60,9 @@ export async function createEntry(data: any, userId: number) {
         totalDebit: totals.debit,
         totalCredit: totals.credit,
         createdById: userId
-      }
-    });
+      });
 
-    await tx.journalLine.createMany({
-      data: data.lines.map((line: any, index: number) => ({
+    await tx.orm.public.JournalLine.createAll(data.lines.map((line: any, index: number) => ({
         entryId: entry.id,
         lineNumber: index + 1,
         accountId: line.accountId,
@@ -81,19 +72,15 @@ export async function createEntry(data: any, userId: number) {
         projectId: line.projectId,
         departmentId: line.departmentId,
         costCenterId: line.costCenterId
-      }))
-    });
+      }))).then((rows) => ({ count: rows.length }));
 
     return entry;
-  });
+  }});
 }
 
 export async function postEntry(entryId: number, userId: number) {
-  return prisma.$transaction(async (tx) => {
-    const entry = await tx.journalEntry.findUnique({
-      where: { id: entryId },
-      include: { lines: true, period: true }
-    });
+  return prisma.transaction(async (tx) => {{
+    const entry = await tx.orm.public.JournalEntry.include('lines').include('period').first({ id: entryId });
 
     if (!entry) throw Errors.notFound('القيد غير موجود');
     if (entry.status !== 'DRAFT') throw Errors.business('يمكن ترحيل المسودات فقط');
@@ -104,15 +91,11 @@ export async function postEntry(entryId: number, userId: number) {
       throw Errors.business('إجماليات القيد لا تطابق الأسطر');
     }
 
-    const posted = await tx.journalEntry.update({
-      where: { id: entryId },
-      data: {
+    const posted = await tx.orm.public.JournalEntry.where((r) => qw(r, { id: entryId })).include('lines').include('period').update({
         status: 'POSTED',
         postedById: userId,
         postedAt: new Date()
-      },
-      include: { lines: true, period: true }
-    });
+      }).then((r0) => r0!);
 
     await applyLedgerLines(tx, posted.date, posted.period?.number ?? posted.date.getUTCMonth() + 1, posted.lines.map((l) => ({
       accountId: l.accountId,
@@ -121,40 +104,29 @@ export async function postEntry(entryId: number, userId: number) {
     })));
 
     return posted;
-  });
+  }});
 }
 
 export async function reverseEntry(entryId: number, userId: number, reversalDate?: string, reason?: string) {
-  return prisma.$transaction(async (tx) => {
-    const original = await tx.journalEntry.findUnique({
-      where: { id: entryId },
-      include: { lines: true, period: true }
-    });
+  return prisma.transaction(async (tx) => {{
+    const original = await tx.orm.public.JournalEntry.include('lines').include('period').first({ id: entryId });
 
     if (!original) throw Errors.notFound('القيد غير موجود');
     if (original.status !== 'POSTED') throw Errors.business('يمكن عكس القيد المرحل فقط');
 
     const reverseAt = reversalDate ? parseDateOrThrow(reversalDate, 'reversalDate') : new Date();
-    const period = await tx.accountingPeriod.findFirst({
-      where: { startDate: { lte: reverseAt }, endDate: { gte: reverseAt }, status: 'OPEN', canPost: true },
-      include: { fiscalYear: true }
-    });
+    const period = await tx.orm.public.AccountingPeriod.include('fiscalYear').first((r) => qw(r, { startDate: { lte: reverseAt }, endDate: { gte: reverseAt }, status: 'OPEN', canPost: true }));
     if (!period || period.fiscalYear.status !== 'OPEN') throw Errors.business('لا يمكن العكس في فترة مغلقة');
 
     const reverseYear = reverseAt.getUTCFullYear();
-    const latest = await tx.journalEntry.findFirst({
-      where: {
+    const latest = await tx.orm.public.JournalEntry.select('entryNumber').orderBy((r) => r.entryNumber.desc()).first((r) => qw(r, {
         entryNumber: {
           startsWith: `REV-${reverseYear}-`
         }
-      },
-      select: { entryNumber: true },
-      orderBy: { entryNumber: 'desc' }
-    });
+      }));
     const entryNumber = buildSequentialNumberFromLatest('REV', latest?.entryNumber, reverseYear);
 
-    const reversal = await tx.journalEntry.create({
-      data: {
+    const reversal = await tx.orm.public.JournalEntry.create({
         entryNumber,
         date: reverseAt,
         periodId: period.id,
@@ -167,8 +139,7 @@ export async function reverseEntry(entryId: number, userId: number, reversalDate
         createdById: userId,
         postedById: userId,
         postedAt: new Date()
-      }
-    });
+      });
 
     const reversedLines = original.lines.map((line, i) => ({
       entryId: reversal.id,
@@ -182,9 +153,9 @@ export async function reverseEntry(entryId: number, userId: number, reversalDate
       costCenterId: line.costCenterId
     }));
 
-    await tx.journalLine.createMany({ data: reversedLines });
+    await tx.orm.public.JournalLine.createAll(reversedLines).then((rows) => ({ count: rows.length }));
 
-    await tx.journalEntry.update({ where: { id: original.id }, data: { status: 'REVERSED' } });
+    await tx.orm.public.JournalEntry.where((r) => qw(r, { id: original.id })).update({ status: 'REVERSED' }).then((r0) => r0!);
 
     await applyLedgerLines(tx, reverseAt, period.number, reversedLines.map((l) => ({
       accountId: l.accountId,
@@ -193,7 +164,7 @@ export async function reverseEntry(entryId: number, userId: number, reversalDate
     })));
 
     return reversal;
-  });
+  }});
 }
 
 export async function listEntries(query: any) {
@@ -210,14 +181,8 @@ export async function listEntries(query: any) {
   }
 
   const [rows, total] = await Promise.all([
-    prisma.journalEntry.findMany({
-      where,
-      skip,
-      take: limit,
-      include: { createdBy: true, postedBy: true, lines: true },
-      orderBy: [{ date: 'desc' }, { id: 'desc' }]
-    }),
-    prisma.journalEntry.count({ where })
+    prisma.orm.public.JournalEntry.where((r) => qw(r, where)).include('createdBy').include('postedBy').include('lines').orderBy([(r) => r.date.desc(), (r) => r.id.desc()]).offset(skip).limit(limit).all(),
+    prisma.orm.public.JournalEntry.where((r) => qw(r, where)).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n)
   ]);
 
   return {
@@ -232,15 +197,15 @@ export async function listEntries(query: any) {
 }
 
 export async function deleteDraft(id: number) {
-  const entry = await prisma.journalEntry.findUnique({ where: { id } });
+  const entry = await prisma.orm.public.JournalEntry.first({ id });
   if (!entry) throw Errors.notFound('القيد غير موجود');
   if (entry.status !== 'DRAFT') throw Errors.business('لا يمكن حذف قيد مرحل أو غير مسودة');
-  await prisma.journalEntry.delete({ where: { id } });
+  await prisma.orm.public.JournalEntry.where((r) => qw(r, { id })).delete().then((r0) => r0!);
   return { deleted: true, id };
 }
 
 export async function updateDraftEntry(id: number, data: any) {
-  const existing = await prisma.journalEntry.findUnique({ where: { id }, include: { lines: true } });
+  const existing = await prisma.orm.public.JournalEntry.include('lines').first({ id });
   if (!existing) throw Errors.notFound('القيد غير موجود');
   if (existing.status !== 'DRAFT') throw Errors.business('يمكن تعديل المسودة فقط');
 
@@ -258,10 +223,8 @@ export async function updateDraftEntry(id: number, data: any) {
   const date = data.date ? parseDateOrThrow(data.date, 'date') : existing.date;
   const period = await resolvePeriod(date);
 
-  return prisma.$transaction(async (tx) => {
-    const entry = await tx.journalEntry.update({
-      where: { id },
-      data: {
+  return prisma.transaction(async (tx) => {{
+    const entry = await tx.orm.public.JournalEntry.where((r) => qw(r, { id })).update({
         date,
         periodId: period.id,
         description: data.description ?? existing.description,
@@ -269,13 +232,11 @@ export async function updateDraftEntry(id: number, data: any) {
         source: data.source ?? existing.source,
         totalDebit: totals.debit,
         totalCredit: totals.credit
-      }
-    });
+      }).then((r0) => r0!);
 
     if (data.lines) {
-      await tx.journalLine.deleteMany({ where: { entryId: id } });
-      await tx.journalLine.createMany({
-        data: mergedLines.map((line: any, index: number) => ({
+      await tx.orm.public.JournalLine.where((r) => qw(r, { entryId: id })).deleteAndCount().then((n0) => ({ count: n0 }));
+      await tx.orm.public.JournalLine.createAll(mergedLines.map((line: any, index: number) => ({
           entryId: id,
           lineNumber: index + 1,
           accountId: line.accountId,
@@ -285,27 +246,23 @@ export async function updateDraftEntry(id: number, data: any) {
           projectId: line.projectId,
           departmentId: line.departmentId,
           costCenterId: line.costCenterId
-        }))
-      });
+        }))).then((rows) => ({ count: rows.length }));
     }
 
     return entry;
-  });
+  }});
 }
 
 export async function voidEntry(id: number, reason?: string) {
-  const entry = await prisma.journalEntry.findUnique({ where: { id } });
+  const entry = await prisma.orm.public.JournalEntry.first({ id });
   if (!entry) throw Errors.notFound('القيد غير موجود');
   if (entry.status === 'POSTED') throw Errors.business('القيد المرحل لا يُلغى مباشرة، استخدم العكس');
   if (entry.status === 'REVERSED') throw Errors.business('لا يمكن إلغاء قيد معكوس');
 
-  return prisma.journalEntry.update({
-    where: { id },
-    data: {
+  return prisma.orm.public.JournalEntry.where((r) => qw(r, { id })).update({
       status: 'VOID',
       notes: reason ? `${entry.notes ?? ''}\nإلغاء: ${reason}`.trim() : entry.notes
-    }
-  });
+    }).then((r0) => r0!);
 }
 
 export async function bulkPostEntries(entryIds: number[], userId: number) {

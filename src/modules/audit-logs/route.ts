@@ -1,4 +1,5 @@
 ﻿import { Router } from 'express';
+import { qw } from '../../utils/where';
 import { prisma } from '../../config/database';
 import { authenticate } from '../../middleware/auth';
 import { requirePermissions } from '../../middleware/rbac';
@@ -17,14 +18,8 @@ router.get('/', async (req, res) => {
   const where = table ? { table } : {};
 
   const [rows, total] = await Promise.all([
-    prisma.auditLog.findMany({
-      where,
-      include: { user: true },
-      skip,
-      take: limit,
-      orderBy: { createdAt: 'desc' }
-    }),
-    prisma.auditLog.count({ where })
+    prisma.orm.public.AuditLog.where((r) => qw(r, where)).include('user').orderBy((r) => r.createdAt.desc()).offset(skip).limit(limit).all(),
+    prisma.orm.public.AuditLog.where((r) => qw(r, where)).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n)
   ]);
 
   ok(res, rows, {

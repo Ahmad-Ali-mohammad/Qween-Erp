@@ -1,3 +1,4 @@
+import { qw } from '../../utils/where';
 import { prisma } from '../../config/database';
 
 function buildPage(query: any) {
@@ -38,13 +39,8 @@ export async function listNotifications(query: any, userId: number) {
   };
 
   const [rows, total] = await Promise.all([
-    prisma.notification.findMany({
-      where,
-      skip: page.skip,
-      take: page.limit,
-      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }]
-    }),
-    prisma.notification.count({ where })
+    prisma.orm.public.Notification.where((r) => qw(r, where)).orderBy([(r) => r.createdAt.desc(), (r) => r.id.desc()]).offset(page.skip).limit(page.limit).all(),
+    prisma.orm.public.Notification.where((r) => qw(r, where)).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n)
   ]);
 
   return {
@@ -65,21 +61,13 @@ export async function listTasks(query: any) {
   if (query.openOnly) where.status = { notIn: ['DONE', 'CLOSED', 'COMPLETED'] };
 
   const [rows, total] = await Promise.all([
-    prisma.userTask.findMany({
-      where,
-      skip: page.skip,
-      take: page.limit,
-      orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }]
-    }),
-    prisma.userTask.count({ where })
+    prisma.orm.public.UserTask.where((r) => qw(r, where)).orderBy([(r) => r.updatedAt.desc(), (r) => r.id.desc()]).offset(page.skip).limit(page.limit).all(),
+    prisma.orm.public.UserTask.where((r) => qw(r, where)).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n)
   ]);
 
   const userIds = Array.from(new Set(rows.map((row) => row.userId).filter((value): value is number => Number.isInteger(value))));
   const users = userIds.length
-    ? await prisma.user.findMany({
-        where: { id: { in: userIds } },
-        select: { id: true, username: true, fullName: true }
-      })
+    ? await prisma.orm.public.User.where((r) => qw(r, { id: { in: userIds } })).select('id', 'username', 'fullName').all()
     : [];
   const usersMap = new Map(users.map((row) => [row.id, row]));
 
@@ -103,21 +91,16 @@ export async function listApprovalRequests(query: any) {
   const branchFilter = branchId ? { branchId } : {};
 
   const [quotes, invoices, payments, contracts, purchaseOrders, tenders, ipcs, budgeting, inspections, maintenanceOrders] = await Promise.all([
-    prisma.salesQuote.findMany({ where: { ...branchFilter, approvalStatus: 'PENDING' }, orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }], take: limit }),
-    prisma.invoice.findMany({ where: { ...branchFilter, approvalStatus: 'PENDING' }, orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }], take: limit }),
-    prisma.payment.findMany({ where: { ...branchFilter, approvalStatus: 'PENDING' }, orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }], take: limit }),
-    prisma.contract.findMany({ where: { ...branchFilter, approvalStatus: 'PENDING' }, orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }], take: limit }),
-    prisma.purchaseOrder.findMany({ where: { ...branchFilter, approvalStatus: 'PENDING' }, orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }], take: limit }),
-    prisma.tender.findMany({ where: { ...branchFilter, approvalStatus: 'PENDING' }, orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }], take: limit }),
-    prisma.subcontractIpc.findMany({
-      where: { approvalStatus: 'PENDING', ...(branchId ? { subcontract: { is: { branchId } } } : {}) },
-      include: { subcontract: { select: { id: true, number: true, title: true, branchId: true } } },
-      orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
-      take: limit
-    }),
-    prisma.budgetScenario.findMany({ where: { ...branchFilter, approvalStatus: 'PENDING' }, orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }], take: limit }),
-    prisma.inspection.findMany({ where: { ...branchFilter, approvalStatus: 'PENDING' }, orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }], take: limit }),
-    prisma.maintenanceOrder.findMany({ where: { ...branchFilter, approvalStatus: 'PENDING' }, orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }], take: limit })
+    prisma.orm.public.SalesQuote.where((r) => qw(r, { ...branchFilter, approvalStatus: 'PENDING' })).orderBy([(r) => r.updatedAt.desc(), (r) => r.id.desc()]).limit(limit).all(),
+    prisma.orm.public.Invoice.where((r) => qw(r, { ...branchFilter, approvalStatus: 'PENDING' })).orderBy([(r) => r.updatedAt.desc(), (r) => r.id.desc()]).limit(limit).all(),
+    prisma.orm.public.Payment.where((r) => qw(r, { ...branchFilter, approvalStatus: 'PENDING' })).orderBy([(r) => r.updatedAt.desc(), (r) => r.id.desc()]).limit(limit).all(),
+    prisma.orm.public.Contract.where((r) => qw(r, { ...branchFilter, approvalStatus: 'PENDING' })).orderBy([(r) => r.updatedAt.desc(), (r) => r.id.desc()]).limit(limit).all(),
+    prisma.orm.public.PurchaseOrder.where((r) => qw(r, { ...branchFilter, approvalStatus: 'PENDING' })).orderBy([(r) => r.updatedAt.desc(), (r) => r.id.desc()]).limit(limit).all(),
+    prisma.orm.public.Tender.where((r) => qw(r, { ...branchFilter, approvalStatus: 'PENDING' })).orderBy([(r) => r.updatedAt.desc(), (r) => r.id.desc()]).limit(limit).all(),
+    prisma.orm.public.SubcontractIpc.where((r) => qw(r, { approvalStatus: 'PENDING', ...(branchId ? { subcontract: { is: { branchId } } } : {}) })).include('subcontract', (inc) => inc.select('id', 'number', 'title', 'branchId')).orderBy([(r) => r.updatedAt.desc(), (r) => r.id.desc()]).limit(limit).all(),
+    prisma.orm.public.BudgetScenario.where((r) => qw(r, { ...branchFilter, approvalStatus: 'PENDING' })).orderBy([(r) => r.updatedAt.desc(), (r) => r.id.desc()]).limit(limit).all(),
+    prisma.orm.public.Inspection.where((r) => qw(r, { ...branchFilter, approvalStatus: 'PENDING' })).orderBy([(r) => r.updatedAt.desc(), (r) => r.id.desc()]).limit(limit).all(),
+    prisma.orm.public.MaintenanceOrder.where((r) => qw(r, { ...branchFilter, approvalStatus: 'PENDING' })).orderBy([(r) => r.updatedAt.desc(), (r) => r.id.desc()]).limit(limit).all()
   ]);
 
   const [projectMap, assetMap] = await Promise.all([
@@ -271,13 +254,8 @@ export async function listLiveEvents(query: any) {
   if (query.status) where.status = String(query.status);
 
   const [rows, total] = await Promise.all([
-    prisma.outboxEvent.findMany({
-      where,
-      skip: page.skip,
-      take: page.limit,
-      orderBy: [{ occurredAt: 'desc' }, { id: 'desc' }]
-    }),
-    prisma.outboxEvent.count({ where })
+    prisma.orm.public.OutboxEvent.where((r) => qw(r, where)).orderBy([(r) => r.occurredAt.desc(), (r) => r.id.desc()]).offset(page.skip).limit(page.limit).all(),
+    prisma.orm.public.OutboxEvent.where((r) => qw(r, where)).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n)
   ]);
 
   return {

@@ -1,4 +1,5 @@
 ﻿import { Router } from 'express';
+import { qw } from '../../utils/where';
 import { z } from 'zod';
 import { prisma } from '../../config/database';
 import { authenticate } from '../../middleware/auth';
@@ -18,13 +19,13 @@ const router = Router();
 router.use(authenticate, requirePermissions(PERMISSIONS.ROLES_READ));
 
 router.get('/', async (_req, res) => {
-  const roles = await prisma.role.findMany({ orderBy: { id: 'desc' } });
+  const roles = await prisma.orm.public.Role.orderBy((r) => r.id.desc()).all();
   ok(res, roles);
 });
 
 router.post('/', requirePermissions(PERMISSIONS.ROLES_WRITE), validateBody(schema), async (req, res, next) => {
   try {
-    const role = await prisma.role.create({ data: req.body });
+    const role = await prisma.orm.public.Role.create(req.body);
     ok(res, role, undefined, 201);
   } catch (error) {
     next(error);
@@ -33,7 +34,7 @@ router.post('/', requirePermissions(PERMISSIONS.ROLES_WRITE), validateBody(schem
 
 router.put('/:id', requirePermissions(PERMISSIONS.ROLES_WRITE), validateBody(schema.partial()), async (req, res, next) => {
   try {
-    const role = await prisma.role.update({ where: { id: Number(req.params.id) }, data: req.body });
+    const role = await prisma.orm.public.Role.where((r) => qw(r, { id: Number(req.params.id) })).update(req.body).then((r0) => r0!);
     ok(res, role);
   } catch (error) {
     next(error);
@@ -42,7 +43,7 @@ router.put('/:id', requirePermissions(PERMISSIONS.ROLES_WRITE), validateBody(sch
 
 router.delete('/:id', requirePermissions(PERMISSIONS.ROLES_WRITE), async (req, res, next) => {
   try {
-    await prisma.role.delete({ where: { id: Number(req.params.id) } });
+    await prisma.orm.public.Role.where((r) => qw(r, { id: Number(req.params.id) })).delete().then((r0) => r0!);
     ok(res, { deleted: true });
   } catch (error) {
     next(error);

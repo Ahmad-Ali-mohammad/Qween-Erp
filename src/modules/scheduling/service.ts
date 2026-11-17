@@ -1,3 +1,4 @@
+import { qw } from '../../utils/where';
 import { prisma } from '../../config/database';
 import { enqueueOutboxEvent } from '../../platform/events/outbox';
 import { buildSequentialNumberFromLatest } from '../../utils/id-generator';
@@ -218,24 +219,23 @@ export async function listPlans(query: any) {
   if (query.status) where.status = String(query.status);
 
   const [rows, total] = await Promise.all([
-    prisma.schedulePlan.findMany({ where, skip: page.skip, take: page.limit, orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }] }),
-    prisma.schedulePlan.count({ where })
+    prisma.orm.public.SchedulePlan.where((r) => qw(r, where)).orderBy([(r) => r.updatedAt.desc(), (r) => r.id.desc()]).offset(page.skip).limit(page.limit).all(),
+    prisma.orm.public.SchedulePlan.where((r) => qw(r, where)).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n)
   ]);
 
   return {
-    rows: await prisma.$transaction((tx) => enrichPlanRows(tx, rows)),
+    rows: await prisma.transaction(async (tx) => enrichPlanRows(tx, rows)),
     meta: { page: page.page, limit: page.limit, total, pages: Math.max(1, Math.ceil(total / page.limit)) }
   };
 }
 
 export async function createPlan(data: any, userId: number) {
-  return prisma.$transaction(async (tx) => {
+  return prisma.transaction(async (tx) => {{
     const projectId = toPositiveInt(data.projectId, 'projectId', true);
     const project = await ensureProject(tx, projectId);
     const branchId = toPositiveInt(data.branchId ?? project?.branchId, 'branchId', true);
 
-    const row = await tx.schedulePlan.create({
-      data: {
+    const row = await tx.orm.public.SchedulePlan.create({
         code: data.code ?? (await generateCode(tx)),
         branchId,
         projectId,
@@ -250,8 +250,7 @@ export async function createPlan(data: any, userId: number) {
         notes: toText(data.notes),
         createdById: userId,
         updatedById: userId
-      }
-    });
+      });
 
     await enqueueOutboxEvent(tx, {
       eventType: 'scheduling.plan.created',
@@ -263,7 +262,7 @@ export async function createPlan(data: any, userId: number) {
     });
 
     return fetchPlanRow(tx, row.id);
-  });
+  }});
 }
 
 export async function listTasks(query: any) {
@@ -276,18 +275,18 @@ export async function listTasks(query: any) {
   Object.assign(where, buildDateRange(query, 'endDate'));
 
   const [rows, total] = await Promise.all([
-    prisma.scheduleTask.findMany({ where, skip: page.skip, take: page.limit, orderBy: [{ startDate: 'asc' }, { id: 'asc' }] }),
-    prisma.scheduleTask.count({ where })
+    prisma.orm.public.ScheduleTask.where((r) => qw(r, where)).orderBy([(r) => r.startDate.asc(), (r) => r.id.asc()]).offset(page.skip).limit(page.limit).all(),
+    prisma.orm.public.ScheduleTask.where((r) => qw(r, where)).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n)
   ]);
 
   return {
-    rows: await prisma.$transaction((tx) => enrichTaskRows(tx, rows)),
+    rows: await prisma.transaction(async (tx) => enrichTaskRows(tx, rows)),
     meta: { page: page.page, limit: page.limit, total, pages: Math.max(1, Math.ceil(total / page.limit)) }
   };
 }
 
 export async function createTask(data: any, userId: number) {
-  return prisma.$transaction(async (tx) => {
+  return prisma.transaction(async (tx) => {{
     const planId = toPositiveInt(data.planId, 'planId')!;
     const plan = await ensurePlan(tx, planId);
     const projectId = toPositiveInt(data.projectId ?? plan.projectId, 'projectId', true);
@@ -297,8 +296,7 @@ export async function createTask(data: any, userId: number) {
     const endDate = parseDateOrThrow(data.endDate, 'endDate');
     if (endDate.getTime() < startDate.getTime()) throw Errors.validation('تاريخ النهاية يجب أن يكون بعد تاريخ البداية');
     const durationDays = Number(data.durationDays ?? durationBetween(startDate, endDate));
-    const task = await tx.scheduleTask.create({
-      data: {
+    const task = await tx.orm.public.ScheduleTask.create({
         planId,
         branchId,
         projectId,
@@ -316,16 +314,14 @@ export async function createTask(data: any, userId: number) {
         postingStatus: 'NOT_APPLICABLE',
         createdById: userId,
         updatedById: userId
-      }
-    });
+      });
 
     const assignments = Array.isArray(data.assignments) ? data.assignments : [];
     for (const assignment of assignments) {
       const resourceType = String(assignment.resourceType).toUpperCase();
       const resourceRefId = toPositiveInt(assignment.resourceRefId, 'resourceRefId')!;
       await validateAssignmentRef(tx, resourceType, resourceRefId);
-      await tx.resourceAssignment.create({
-        data: {
+      await tx.orm.public.ResourceAssignment.create({
           planId,
           taskId: task.id,
           resourceType,
@@ -337,8 +333,7 @@ export async function createTask(data: any, userId: number) {
           postingStatus: 'NOT_APPLICABLE',
           createdById: userId,
           updatedById: userId
-        }
-      });
+        });
     }
 
     await enqueueOutboxEvent(tx, {
@@ -351,7 +346,7 @@ export async function createTask(data: any, userId: number) {
     });
 
     return fetchTaskRow(tx, task.id);
-  });
+  }});
 }
 
 export async function listDependencies(query: any) {
@@ -360,18 +355,18 @@ export async function listDependencies(query: any) {
   if (query.planId) where.planId = Number(query.planId);
 
   const [rows, total] = await Promise.all([
-    prisma.taskDependency.findMany({ where, skip: page.skip, take: page.limit, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }] }),
-    prisma.taskDependency.count({ where })
+    prisma.orm.public.TaskDependency.where((r) => qw(r, where)).orderBy([(r) => r.createdAt.desc(), (r) => r.id.desc()]).offset(page.skip).limit(page.limit).all(),
+    prisma.orm.public.TaskDependency.where((r) => qw(r, where)).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n)
   ]);
 
   return {
-    rows: await prisma.$transaction((tx) => enrichDependencyRows(tx, rows)),
+    rows: await prisma.transaction(async (tx) => enrichDependencyRows(tx, rows)),
     meta: { page: page.page, limit: page.limit, total, pages: Math.max(1, Math.ceil(total / page.limit)) }
   };
 }
 
 export async function createDependency(data: any, userId: number) {
-  return prisma.$transaction(async (tx) => {
+  return prisma.transaction(async (tx) => {{
     const planId = toPositiveInt(data.planId, 'planId')!;
     await ensurePlan(tx, planId);
     const predecessorTaskId = toPositiveInt(data.predecessorTaskId, 'predecessorTaskId')!;
@@ -383,18 +378,16 @@ export async function createDependency(data: any, userId: number) {
       throw Errors.business('يجب أن تنتمي المهام إلى نفس الخطة الزمنية');
     }
 
-    const row = await tx.taskDependency.create({
-      data: {
+    const row = await tx.orm.public.TaskDependency.create({
         planId,
         predecessorTaskId,
         successorTaskId,
         dependencyType: String(data.dependencyType ?? 'FS').toUpperCase(),
         lagDays: Number(data.lagDays ?? 0)
-      }
-    });
+      });
 
     return fetchDependencyRow(tx, row.id);
-  });
+  }});
 }
 
 export async function listCriticalPathSnapshots(query: any) {
@@ -404,24 +397,21 @@ export async function listCriticalPathSnapshots(query: any) {
   Object.assign(where, buildDateRange(query, 'snapshotDate'));
 
   const [rows, total] = await Promise.all([
-    prisma.criticalPathSnapshot.findMany({ where, skip: page.skip, take: page.limit, orderBy: [{ snapshotDate: 'desc' }, { id: 'desc' }] }),
-    prisma.criticalPathSnapshot.count({ where })
+    prisma.orm.public.CriticalPathSnapshot.where((r) => qw(r, where)).orderBy([(r) => r.snapshotDate.desc(), (r) => r.id.desc()]).offset(page.skip).limit(page.limit).all(),
+    prisma.orm.public.CriticalPathSnapshot.where((r) => qw(r, where)).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n)
   ]);
 
   return {
-    rows: await prisma.$transaction((tx) => enrichSnapshotRows(tx, rows)),
+    rows: await prisma.transaction(async (tx) => enrichSnapshotRows(tx, rows)),
     meta: { page: page.page, limit: page.limit, total, pages: Math.max(1, Math.ceil(total / page.limit)) }
   };
 }
 
 export async function createCriticalPathSnapshot(data: any, userId: number) {
-  return prisma.$transaction(async (tx) => {
+  return prisma.transaction(async (tx) => {{
     const planId = toPositiveInt(data.planId, 'planId')!;
     const plan = await ensurePlan(tx, planId);
-    const tasks = await tx.scheduleTask.findMany({
-      where: { planId },
-      orderBy: [{ startDate: 'asc' }, { id: 'asc' }]
-    });
+    const tasks = await tx.orm.public.ScheduleTask.where((r) => qw(r, { planId })).orderBy([(r) => r.startDate.asc(), (r) => r.id.asc()]).all();
     const now = new Date();
     const criticalTasks = tasks.filter((task: any) => Boolean(task.isCritical));
     const delayedTasks = tasks.filter((task: any) => new Date(task.endDate).getTime() < now.getTime() && Number(task.progressPercent ?? 0) < 100);
@@ -436,8 +426,7 @@ export async function createCriticalPathSnapshot(data: any, userId: number) {
       }))
     };
 
-    const row = await tx.criticalPathSnapshot.create({
-      data: {
+    const row = await tx.orm.public.CriticalPathSnapshot.create({
         planId,
         snapshotDate: new Date(),
         title: toText(data.title) ?? `Snapshot ${new Date().toISOString().slice(0, 10)}`,
@@ -448,8 +437,7 @@ export async function createCriticalPathSnapshot(data: any, userId: number) {
         status: 'SNAPSHOT',
         createdById: userId,
         updatedById: userId
-      }
-    });
+      });
 
     await enqueueOutboxEvent(tx, {
       eventType: 'scheduling.critical-path.snapshot.created',
@@ -472,5 +460,5 @@ export async function createCriticalPathSnapshot(data: any, userId: number) {
     }
 
     return fetchSnapshotRow(tx, row.id);
-  });
+  }});
 }

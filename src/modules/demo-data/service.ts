@@ -1,3 +1,4 @@
+import { qw } from '../../utils/where';
 import fs from 'fs/promises';
 import path from 'path';
 import { Prisma } from '@prisma/client';
@@ -238,14 +239,12 @@ function buildOperationalTablesSql() {
   return tables.map((name) => `"${name}"`).join(', ');
 }
 
-async function purgeOperationalData(tx: Prisma.TransactionClient) {
+async function purgeOperationalData(tx: any) {
   const sql = `TRUNCATE TABLE ${buildOperationalTablesSql()} RESTART IDENTITY CASCADE`;
   await tx.$executeRawUnsafe(sql);
-  await tx.systemSettings.updateMany({
-    data: {
+  await tx.orm.public.SystemSettings.where((r) => qw(r, {})).updateAndCount({
       postingAccounts: {}
-    }
-  });
+    }).then((n0) => ({ count: n0 }));
 }
 
 type CoreRefs = {
@@ -259,18 +258,11 @@ type CoreRefs = {
   fixedAssetCategoryId: number;
 };
 
-async function ensureCoreMasters(tx: Prisma.TransactionClient, currencyCode: string): Promise<CoreRefs> {
-  const admin = await tx.user.findFirst({
-    where: { username: 'admin' },
-    select: { id: true }
-  });
+async function ensureCoreMasters(tx: any, currencyCode: string): Promise<CoreRefs> {
+  const admin = await tx.orm.public.User.select('id').first({ username: 'admin' });
   if (!admin) throw Errors.business('مستخدم admin غير موجود. شغّل prisma seed أولاً.');
 
-  await tx.companyProfile.upsert({
-    where: { id: 1 },
-    update: { currency: currencyCode },
-    create: { id: 1, nameAr: 'شركة واحدة', currency: currencyCode }
-  });
+  await tx.orm.public.CompanyProfile.upsert({ create: { id: 1, nameAr: 'شركة واحدة', currency: currencyCode }, update: { currency: currencyCode }, conflictOn: { id: 1 } });
 
   const accounts = [
     { code: '1000', nameAr: 'الأصول', type: 'ASSET', level: 1, allowPosting: false, normalBalance: 'Debit' },
@@ -290,9 +282,15 @@ async function ensureCoreMasters(tx: Prisma.TransactionClient, currencyCode: str
 
   const byCode = new Map<string, number>();
   for (const acc of accounts.filter((row) => !(row as { parentCode?: string }).parentCode)) {
-    const saved = await tx.account.upsert({
-      where: { code: acc.code },
-      update: {
+    const saved = await tx.orm.public.Account.upsert({ create: {
+        code: acc.code,
+        nameAr: acc.nameAr,
+        type: acc.type as any,
+        level: acc.level,
+        allowPosting: acc.allowPosting,
+        normalBalance: acc.normalBalance,
+        isControl: !acc.allowPosting
+      }, update: {
         nameAr: acc.nameAr,
         type: acc.type as any,
         level: acc.level,
@@ -301,17 +299,7 @@ async function ensureCoreMasters(tx: Prisma.TransactionClient, currencyCode: str
         isControl: !acc.allowPosting,
         parentId: null,
         isActive: true
-      },
-      create: {
-        code: acc.code,
-        nameAr: acc.nameAr,
-        type: acc.type as any,
-        level: acc.level,
-        allowPosting: acc.allowPosting,
-        normalBalance: acc.normalBalance,
-        isControl: !acc.allowPosting
-      }
-    });
+      }, conflictOn: { code: acc.code } });
     byCode.set(saved.code, saved.id);
   }
 
@@ -320,19 +308,7 @@ async function ensureCoreMasters(tx: Prisma.TransactionClient, currencyCode: str
     const parentId = byCode.get(row.parentCode);
     if (!parentId) throw Errors.business(`تعذر العثور على الحساب الأب ${row.parentCode}`);
 
-    const saved = await tx.account.upsert({
-      where: { code: row.code },
-      update: {
-        nameAr: row.nameAr,
-        type: row.type as any,
-        level: row.level,
-        allowPosting: row.allowPosting,
-        normalBalance: row.normalBalance,
-        isControl: !row.allowPosting,
-        parentId,
-        isActive: true
-      },
-      create: {
+    const saved = await tx.orm.public.Account.upsert({ create: {
         code: row.code,
         nameAr: row.nameAr,
         type: row.type as any,
@@ -341,19 +317,22 @@ async function ensureCoreMasters(tx: Prisma.TransactionClient, currencyCode: str
         normalBalance: row.normalBalance,
         isControl: !row.allowPosting,
         parentId
-      }
-    });
+      }, update: {
+        nameAr: row.nameAr,
+        type: row.type as any,
+        level: row.level,
+        allowPosting: row.allowPosting,
+        normalBalance: row.normalBalance,
+        isControl: !row.allowPosting,
+        parentId,
+        isActive: true
+      }, conflictOn: { code: row.code } });
     byCode.set(saved.code, saved.id);
   }
 
-  await tx.currency.upsert({
-    where: { code: currencyCode },
-    update: { isActive: true, isBase: true, nameAr: 'عملة أساسية' },
-    create: { code: currencyCode, nameAr: 'عملة أساسية', isBase: true, isActive: true }
-  });
+  await tx.orm.public.Currency.upsert({ create: { code: currencyCode, nameAr: 'عملة أساسية', isBase: true, isActive: true }, update: { isActive: true, isBase: true, nameAr: 'عملة أساسية' }, conflictOn: { code: currencyCode } });
 
-  const bankAccount = await tx.bankAccount.create({
-    data: {
+  const bankAccount = await tx.orm.public.BankAccount.create({
       name: 'البنك الرئيسي',
       accountNumber: `DMO-${Date.now()}`,
       bankName: 'البنك المحلي',
@@ -361,30 +340,16 @@ async function ensureCoreMasters(tx: Prisma.TransactionClient, currencyCode: str
       currentBalance: 0,
       openingBalance: 0,
       glAccountId: byCode.get('1200')
-    }
-  });
+    });
 
-  const category = await tx.assetCategory.create({
-    data: {
+  const category = await tx.orm.public.AssetCategory.create({
       code: `DMO-AST-${Date.now()}`,
       nameAr: 'أصول تجريبية',
       usefulLifeMonths: 60,
       salvagePercent: 0
-    }
-  });
+    });
 
-  await tx.systemSettings.upsert({
-    where: { id: 1 },
-    update: {
-      postingAccounts: {
-        receivableAccountId: byCode.get('1300'),
-        payableAccountId: byCode.get('2100'),
-        salesRevenueAccountId: byCode.get('4100'),
-        purchaseExpenseAccountId: byCode.get('5100'),
-        cashAccountId: byCode.get('1100')
-      }
-    },
-    create: {
+  await tx.orm.public.SystemSettings.upsert({ create: {
       id: 1,
       invoicePrefix: 'INV',
       quotePrefix: 'QT',
@@ -395,8 +360,15 @@ async function ensureCoreMasters(tx: Prisma.TransactionClient, currencyCode: str
         purchaseExpenseAccountId: byCode.get('5100'),
         cashAccountId: byCode.get('1100')
       }
-    }
-  });
+    }, update: {
+      postingAccounts: {
+        receivableAccountId: byCode.get('1300'),
+        payableAccountId: byCode.get('2100'),
+        salesRevenueAccountId: byCode.get('4100'),
+        purchaseExpenseAccountId: byCode.get('5100'),
+        cashAccountId: byCode.get('1100')
+      }
+    }, conflictOn: { id: 1 } });
 
   return {
     adminUserId: admin.id,
@@ -427,24 +399,21 @@ function distributeTotal(total: number, parts: number): number[] {
   return values;
 }
 
-async function createFiscalYearsAndPeriods(tx: Prisma.TransactionClient, years: number[]) {
+async function createFiscalYearsAndPeriods(tx: any, years: number[]) {
   const monthNames = ['يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو', 'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'];
   const latestYear = Math.max(...years);
   let periods = 0;
 
   for (const year of years) {
-    const fy = await tx.fiscalYear.create({
-      data: {
+    const fy = await tx.orm.public.FiscalYear.create({
         name: String(year),
         startDate: firstUtcDay(year, 1),
         endDate: lastUtcDay(year, 12),
         status: year === latestYear ? 'OPEN' : 'CLOSED',
         isCurrent: year === latestYear
-      }
-    });
+      });
     for (let month = 1; month <= 12; month += 1) {
-      await tx.accountingPeriod.create({
-        data: {
+      await tx.orm.public.AccountingPeriod.create({
           fiscalYearId: fy.id,
           number: month,
           name: monthNames[month - 1],
@@ -452,8 +421,7 @@ async function createFiscalYearsAndPeriods(tx: Prisma.TransactionClient, years: 
           endDate: lastUtcDay(year, month),
           status: year === latestYear ? 'OPEN' : 'CLOSED',
           canPost: year === latestYear
-        }
-      });
+        });
       periods += 1;
     }
   }
@@ -461,56 +429,47 @@ async function createFiscalYearsAndPeriods(tx: Prisma.TransactionClient, years: 
   return { years: years.length, periods };
 }
 
-async function createPartiesAndItems(tx: Prisma.TransactionClient, data: DemoDataFile) {
+async function createPartiesAndItems(tx: any, data: DemoDataFile) {
   const customers = await Promise.all(
     Array.from({ length: data.customersCount }).map((_, idx) =>
-      tx.customer.create({
-        data: {
+      tx.orm.public.Customer.create({
           code: `DMO-CUST-${String(idx + 1).padStart(3, '0')}`,
           nameAr: `عميل تجريبي ${idx + 1}`,
           city: idx % 2 === 0 ? 'الرياض' : 'جدة',
           phone: `05${String(10000000 + idx).slice(0, 8)}`,
           email: `demo.customer.${idx + 1}@erp.local`,
           creditLimit: 250000
-        }
-      })
+        })
     )
   );
 
   const suppliers = await Promise.all(
     Array.from({ length: data.suppliersCount }).map((_, idx) =>
-      tx.supplier.create({
-        data: {
+      tx.orm.public.Supplier.create({
           code: `DMO-SUP-${String(idx + 1).padStart(3, '0')}`,
           nameAr: `مورد تجريبي ${idx + 1}`,
           city: idx % 2 === 0 ? 'الرياض' : 'الدمام',
           phone: `05${String(20000000 + idx).slice(0, 8)}`,
           email: `demo.supplier.${idx + 1}@erp.local`
-        }
-      })
+        })
     )
   );
 
-  const category = await tx.itemCategory.create({
-    data: {
+  const category = await tx.orm.public.ItemCategory.create({
       code: `DMO-CAT-${Date.now()}`,
       nameAr: 'تصنيف تجريبي',
       isActive: true
-    }
-  });
+    });
 
-  const unit = await tx.unit.create({
-    data: {
+  const unit = await tx.orm.public.Unit.create({
       code: `DMO-UOM-${Date.now()}`,
       nameAr: 'قطعة',
       isActive: true
-    }
-  });
+    });
 
   const items = await Promise.all(
     Array.from({ length: data.itemsCount }).map((_, idx) =>
-      tx.item.create({
-        data: {
+      tx.orm.public.Item.create({
           code: `DMO-ITEM-${String(idx + 1).padStart(3, '0')}`,
           nameAr: `صنف تجريبي ${idx + 1}`,
           categoryId: category.id,
@@ -521,8 +480,7 @@ async function createPartiesAndItems(tx: Prisma.TransactionClient, data: DemoDat
           onHandQty: 100 + idx * 2,
           inventoryValue: roundAmount((100 + idx * 2) * (30 + idx * 2.25)),
           isActive: true
-        }
-      })
+        })
     )
   );
 
@@ -533,7 +491,7 @@ async function createPartiesAndItems(tx: Prisma.TransactionClient, data: DemoDat
   };
 }
 
-async function createAssets(tx: Prisma.TransactionClient, data: DemoDataFile, refs: CoreRefs) {
+async function createAssets(tx: any, data: DemoDataFile, refs: CoreRefs) {
   const years = [...data.years].sort();
   const startYear = years[0];
 
@@ -541,8 +499,7 @@ async function createAssets(tx: Prisma.TransactionClient, data: DemoDataFile, re
     const year = startYear + (i % 3);
     const month = (i % 12) + 1;
     const purchaseCost = roundAmount(2500 + i * 420);
-    await tx.fixedAsset.create({
-      data: {
+    await tx.orm.public.FixedAsset.create({
         code: `DMO-AST-${String(i + 1).padStart(3, '0')}`,
         nameAr: `أصل تجريبي ${i + 1}`,
         categoryId: refs.fixedAssetCategoryId,
@@ -556,13 +513,12 @@ async function createAssets(tx: Prisma.TransactionClient, data: DemoDataFile, re
         netBookValue: roundAmount(purchaseCost * 0.75),
         status: 'ACTIVE',
         isDepreciating: true
-      }
-    });
+      });
   }
 }
 
 async function createMonthlyOperationalData(
-  tx: Prisma.TransactionClient,
+  tx: any,
   refs: CoreRefs,
   data: DemoDataFile,
   parties: { customers: Array<{ id: number }>; suppliers: Array<{ id: number }>; items: Array<{ id: number }> }
@@ -605,8 +561,7 @@ async function createMonthlyOperationalData(
       const outstanding = roundAmount(total - paidAmount);
       const customerId = parties.customers[(invoiceSeq + i) % parties.customers.length]?.id;
 
-      const invoice = await tx.invoice.create({
-        data: {
+      const invoice = await tx.orm.public.Invoice.create({
           number: `DMO-SINV-${year}${String(monthNo).padStart(2, '0')}-${String(invoiceSeq).padStart(4, '0')}`,
           type: 'SALES',
           date: midUtcDay(year, monthNo, 5 + i * 6),
@@ -622,11 +577,9 @@ async function createMonthlyOperationalData(
           status: status as any,
           paymentStatus: outstanding > 0 ? 'PENDING' : 'PAID',
           createdById: refs.adminUserId
-        }
-      });
+        });
 
-      await tx.invoiceLine.create({
-        data: {
+      await tx.orm.public.InvoiceLine.create({
           invoiceId: invoice.id,
           lineNumber: 1,
           itemId: parties.items[(invoiceSeq + i) % parties.items.length]?.id,
@@ -634,8 +587,7 @@ async function createMonthlyOperationalData(
           quantity: 1,
           unitPrice: total,
           total
-        }
-      });
+        });
 
       summary.invoices += 1;
       invoiceSeq += 1;
@@ -648,8 +600,7 @@ async function createMonthlyOperationalData(
       const outstanding = roundAmount(total - paidAmount);
       const supplierId = parties.suppliers[(invoiceSeq + i) % parties.suppliers.length]?.id;
 
-      const invoice = await tx.invoice.create({
-        data: {
+      const invoice = await tx.orm.public.Invoice.create({
           number: `DMO-PINV-${year}${String(monthNo).padStart(2, '0')}-${String(invoiceSeq).padStart(4, '0')}`,
           type: 'PURCHASE',
           date: midUtcDay(year, monthNo, 7 + i * 8),
@@ -665,11 +616,9 @@ async function createMonthlyOperationalData(
           status: status as any,
           paymentStatus: outstanding > 0 ? 'PENDING' : 'PAID',
           createdById: refs.adminUserId
-        }
-      });
+        });
 
-      await tx.invoiceLine.create({
-        data: {
+      await tx.orm.public.InvoiceLine.create({
           invoiceId: invoice.id,
           lineNumber: 1,
           itemId: parties.items[(invoiceSeq + i) % parties.items.length]?.id,
@@ -677,16 +626,14 @@ async function createMonthlyOperationalData(
           quantity: 1,
           unitPrice: total,
           total
-        }
-      });
+        });
 
       summary.invoices += 1;
       invoiceSeq += 1;
     }
 
     for (let i = 0; i < month.pendingPayments; i += 1) {
-      await tx.payment.create({
-        data: {
+      await tx.orm.public.Payment.create({
           number: `DMO-PAY-${year}${String(monthNo).padStart(2, '0')}-${String(paymentSeq).padStart(4, '0')}`,
           date: midUtcDay(year, monthNo, 10 + i),
           type: i % 2 === 0 ? 'RECEIPT' : 'PAYMENT',
@@ -698,16 +645,14 @@ async function createMonthlyOperationalData(
           status: i % 3 === 0 ? 'PENDING' : 'COMPLETED',
           description: 'دفعة تجريبية',
           createdById: refs.adminUserId
-        }
-      });
+        });
       paymentSeq += 1;
       summary.payments += 1;
     }
 
     const postedAmount = roundAmount(month.sales * 0.22);
     if (postedAmount > 0) {
-      const entry = await tx.journalEntry.create({
-        data: {
+      const entry = await tx.orm.public.JournalEntry.create({
           entryNumber: `DMO-JRN-${year}${String(monthNo).padStart(2, '0')}-${String(journalSeq).padStart(4, '0')}`,
           date: midUtcDay(year, monthNo, 28),
           periodId,
@@ -720,10 +665,8 @@ async function createMonthlyOperationalData(
           createdById: refs.adminUserId,
           postedById: refs.adminUserId,
           postedAt: midUtcDay(year, monthNo, 28)
-        }
-      });
-      await tx.journalLine.createMany({
-        data: [
+        });
+      await tx.orm.public.JournalLine.createAll([
           {
             entryId: entry.id,
             lineNumber: 1,
@@ -740,16 +683,14 @@ async function createMonthlyOperationalData(
             credit: postedAmount,
             description: 'إيراد مبيعات تجريبية'
           }
-        ]
-      });
+        ]).then((rows) => ({ count: rows.length }));
       summary.journals += 1;
       journalSeq += 1;
     }
 
     for (let i = 0; i < month.draftEntries; i += 1) {
       const amount = roundAmount(900 + i * 150);
-      const entry = await tx.journalEntry.create({
-        data: {
+      const entry = await tx.orm.public.JournalEntry.create({
           entryNumber: `DMO-DRF-${year}${String(monthNo).padStart(2, '0')}-${String(journalSeq).padStart(4, '0')}`,
           date: midUtcDay(year, monthNo, 11 + i),
           periodId,
@@ -760,10 +701,8 @@ async function createMonthlyOperationalData(
           totalDebit: amount,
           totalCredit: amount,
           createdById: refs.adminUserId
-        }
-      });
-      await tx.journalLine.createMany({
-        data: [
+        });
+      await tx.orm.public.JournalLine.createAll([
           {
             entryId: entry.id,
             lineNumber: 1,
@@ -780,42 +719,36 @@ async function createMonthlyOperationalData(
             credit: amount,
             description: 'سداد نقدي'
           }
-        ]
-      });
+        ]).then((rows) => ({ count: rows.length }));
       summary.journals += 1;
       journalSeq += 1;
     }
 
     for (let i = 0; i < month.openTasks; i += 1) {
-      await tx.userTask.create({
-        data: {
+      await tx.orm.public.UserTask.create({
           userId: refs.adminUserId,
           title: `مهمة تجريبية ${month.period}-${i + 1}`,
           description: 'بيانات اختبارية للوحة التحكم',
           priority: i % 2 === 0 ? 'MEDIUM' : 'HIGH',
           status: 'OPEN',
           dueDate: midUtcDay(year, monthNo, Math.min(25, 12 + i))
-        }
-      });
+        });
       summary.tasks += 1;
     }
 
     for (let i = 0; i < month.openTickets; i += 1) {
-      await tx.supportTicket.create({
-        data: {
+      await tx.orm.public.SupportTicket.create({
           number: `DMO-TKT-${year}${String(monthNo).padStart(2, '0')}-${String(summary.tickets + 1).padStart(4, '0')}`,
           subject: `تذكرة دعم تجريبية ${month.period}-${i + 1}`,
           description: 'تذكرة اختبار',
           priority: i % 2 === 0 ? 'MEDIUM' : 'HIGH',
           status: 'OPEN'
-        }
-      });
+        });
       summary.tickets += 1;
     }
 
     for (let i = 0; i < month.pendingLeaves; i += 1) {
-      await tx.leaveRequest.create({
-        data: {
+      await tx.orm.public.LeaveRequest.create({
           employeeId: refs.adminUserId,
           type: 'سنوية',
           startDate: midUtcDay(year, monthNo, 18),
@@ -823,8 +756,7 @@ async function createMonthlyOperationalData(
           daysCount: 2,
           status: 'PENDING',
           reason: 'طلب إجازة تجريبي'
-        }
-      });
+        });
       summary.leaves += 1;
     }
   }
@@ -836,8 +768,7 @@ export async function purgeAndImportDemoData(fileData: unknown, options?: { purg
   const data = normalizeDemoData(fileData);
   const purgeFirst = options?.purgeFirst !== false;
 
-  return prisma.$transaction(
-    async (tx) => {
+  return prisma.transaction(async (tx) => {{
       if (purgeFirst) await purgeOperationalData(tx);
       const refs = await ensureCoreMasters(tx, data.currency);
       const periodSummary = await createFiscalYearsAndPeriods(tx, data.years);
@@ -852,22 +783,17 @@ export async function purgeAndImportDemoData(fileData: unknown, options?: { purg
         periods: periodSummary.periods,
         ...summary
       };
-    },
-    {
-      maxWait: 15_000,
-      timeout: 240_000
-    }
-  );
+    }});
 }
 
 export async function purgeAllOperationalData(confirm: string) {
   if (confirm !== 'DELETE ALL') {
     throw Errors.validation('لتأكيد الحذف الكامل أرسل confirm = DELETE ALL');
   }
-  return prisma.$transaction(async (tx) => {
+  return prisma.transaction(async (tx) => {{
     await purgeOperationalData(tx);
     return { deleted: true };
-  });
+  }});
 }
 
 export function getDemoFilePath() {

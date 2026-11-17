@@ -1,4 +1,5 @@
 ﻿import { Router } from 'express';
+import { qw } from '../../utils/where';
 import { prisma } from '../../config/database';
 import { authenticate } from '../../middleware/auth';
 import { requirePermissions } from '../../middleware/rbac';
@@ -29,10 +30,7 @@ async function resolveFiscalYearNumber(query: any): Promise<number | undefined> 
   const fiscalYearId = toPositiveInt(query.fiscalYearId);
   if (!fiscalYearId) return undefined;
 
-  const fy = await prisma.fiscalYear.findUnique({
-    where: { id: fiscalYearId },
-    select: { startDate: true }
-  });
+  const fy = await prisma.orm.public.FiscalYear.select('startDate').first({ id: fiscalYearId });
 
   return fy ? fy.startDate.getUTCFullYear() : undefined;
 }
@@ -44,10 +42,7 @@ async function resolvePeriodNumber(query: any): Promise<number | undefined> {
   const periodId = toPositiveInt(query.periodId);
   if (!periodId) return undefined;
 
-  const p = await prisma.accountingPeriod.findUnique({
-    where: { id: periodId },
-    select: { number: true }
-  });
+  const p = await prisma.orm.public.AccountingPeriod.select('number').first({ id: periodId });
 
   return p?.number;
 }
@@ -59,10 +54,7 @@ async function resolveDateRange(query: any): Promise<{ from: Date; to: Date }> {
 
   const fiscalYearId = toPositiveInt(query.fiscalYearId);
   if (fiscalYearId) {
-    const fy = await prisma.fiscalYear.findUnique({
-      where: { id: fiscalYearId },
-      select: { startDate: true, endDate: true }
-    });
+    const fy = await prisma.orm.public.FiscalYear.select('startDate', 'endDate').first({ id: fiscalYearId });
     if (fy) {
       from = fy.startDate;
       to = fy.endDate;
@@ -71,10 +63,7 @@ async function resolveDateRange(query: any): Promise<{ from: Date; to: Date }> {
 
   const periodId = toPositiveInt(query.periodId);
   if (periodId) {
-    const period = await prisma.accountingPeriod.findUnique({
-      where: { id: periodId },
-      select: { startDate: true, endDate: true }
-    });
+    const period = await prisma.orm.public.AccountingPeriod.select('startDate', 'endDate').first({ id: periodId });
     if (period) {
       from = period.startDate;
       to = period.endDate;
@@ -121,7 +110,7 @@ router.get('/trial-balance', async (req, res) => {
   if (fiscalYear !== undefined) where.fiscalYear = fiscalYear;
   if (period !== undefined) where.period = period;
 
-  const rows = await prisma.accountBalance.findMany({ where, include: { account: true }, orderBy: { account: { code: 'asc' } } });
+  const rows = await prisma.orm.public.AccountBalance.where((r) => qw(r, where)).include('account').orderBy((r) => r.account.r.code.asc()).all();
 
   const totals = rows.reduce(
     (acc, r) => ({ debit: acc.debit + Number(r.debit), credit: acc.credit + Number(r.credit) }),
@@ -134,10 +123,7 @@ router.get('/trial-balance', async (req, res) => {
 router.get('/income-statement', async (req, res) => {
   const { from, to } = await resolveDateRange(req.query);
 
-  const lines = await prisma.journalLine.findMany({
-    where: { entry: { status: 'POSTED', date: { gte: from, lte: to } } },
-    include: { account: true }
-  });
+  const lines = await prisma.orm.public.JournalLine.where((r) => qw(r, { entry: { status: 'POSTED', date: { gte: from, lte: to } } })).include('account').all();
 
   const totals = summarizeIncome(lines);
   const payload: any = {
@@ -148,10 +134,7 @@ router.get('/income-statement', async (req, res) => {
   if (req.query.compareWith) {
     const compareWith = String(req.query.compareWith).trim().toLowerCase();
     const compareRange = buildComparisonRange(from, to, compareWith);
-    const compareLines = await prisma.journalLine.findMany({
-      where: { entry: { status: 'POSTED', date: { gte: compareRange.from, lte: compareRange.to } } },
-      include: { account: true }
-    });
+    const compareLines = await prisma.orm.public.JournalLine.where((r) => qw(r, { entry: { status: 'POSTED', date: { gte: compareRange.from, lte: compareRange.to } } })).include('account').all();
     payload.compare = {
       compareWith,
       period: { dateFrom: compareRange.from.toISOString(), dateTo: compareRange.to.toISOString() },
@@ -171,10 +154,7 @@ router.get('/balance-sheet', async (req, res) => {
   const fiscalYear = resolvedFiscalYear ?? asOfDate.getUTCFullYear();
   const period = resolvedPeriod ?? Math.min(12, Math.max(1, asOfDate.getUTCMonth() + 1));
 
-  const accounts = await prisma.account.findMany({
-    where: { type: { in: ['ASSET', 'LIABILITY', 'EQUITY'] }, isActive: true },
-    include: { balances: { where: { fiscalYear, period: { lte: period } }, orderBy: { period: 'desc' }, take: 1 } }
-  });
+  const accounts = await prisma.orm.public.Account.where((r) => qw(r, { type: { in: ['ASSET', 'LIABILITY', 'EQUITY'] }, isActive: true })).include('balances', (inc) => inc.where((r) => qw(r, { fiscalYear, period: { lte: period } })).orderBy((r) => r.period.desc()).limit(1)).all();
 
   const asAssets = accounts.filter((a) => a.type === 'ASSET');
   const asLiabilities = accounts.filter((a) => a.type === 'LIABILITY');
@@ -218,12 +198,8 @@ router.get('/account-statement', async (req, res) => {
     return;
   }
 
-  const account = await prisma.account.findUnique({ where: { id: accountId } });
-  const lines = await prisma.journalLine.findMany({
-    where: { accountId, entry: { status: 'POSTED', date: { gte: dateFrom, lte: dateTo } } },
-    include: { entry: true },
-    orderBy: { entry: { date: 'asc' } }
-  });
+  const account = await prisma.orm.public.Account.first({ id: accountId });
+  const lines = await prisma.orm.public.JournalLine.where((r) => qw(r, { accountId, entry: { status: 'POSTED', date: { gte: dateFrom, lte: dateTo } } })).include('entry').orderBy((r) => r.entry.r.date.asc()).all();
 
   let running = 0;
   const rows = lines.map((line) => {
@@ -252,10 +228,10 @@ router.get('/account-statement', async (req, res) => {
 
 router.get('/kpis', async (_req, res) => {
   const [draftEntries, pendingInvoices, pendingPayments, activeAssets] = await Promise.all([
-    prisma.journalEntry.count({ where: { status: 'DRAFT' } }),
-    prisma.invoice.count({ where: { status: { in: ['DRAFT', 'ISSUED', 'PARTIAL'] } } }),
-    prisma.payment.count({ where: { status: 'PENDING' } }),
-    prisma.fixedAsset.count({ where: { status: 'ACTIVE' } })
+    prisma.orm.public.JournalEntry.where((r) => qw(r, { status: 'DRAFT' })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n),
+    prisma.orm.public.Invoice.where((r) => qw(r, { status: { in: ['DRAFT', 'ISSUED', 'PARTIAL'] } })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n),
+    prisma.orm.public.Payment.where((r) => qw(r, { status: 'PENDING' })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n),
+    prisma.orm.public.FixedAsset.where((r) => qw(r, { status: 'ACTIVE' })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n)
   ]);
 
   ok(res, { draftEntries, pendingInvoices, pendingPayments, activeAssets });
@@ -271,11 +247,7 @@ router.get('/sales', async (req, res) => {
   if (req.query.customerId) where.customerId = Number(req.query.customerId);
   if (req.query.status) where.status = String(req.query.status);
 
-  const rows = await prisma.invoice.findMany({
-    where,
-    include: { customer: { select: { id: true, code: true, nameAr: true } } },
-    orderBy: [{ date: 'desc' }, { id: 'desc' }]
-  });
+  const rows = await prisma.orm.public.Invoice.where((r) => qw(r, where)).include('customer', (inc) => inc.select('id', 'code', 'nameAr')).orderBy([(r) => r.date.desc(), (r) => r.id.desc()]).all();
 
   const summary = rows.reduce(
     (acc, row) => {
@@ -304,11 +276,7 @@ router.get('/purchases', async (req, res) => {
   if (req.query.status) where.status = String(req.query.status);
 
   const [invoices, purchaseReturns] = await Promise.all([
-    prisma.invoice.findMany({
-      where,
-      include: { supplier: { select: { id: true, code: true, nameAr: true } } },
-      orderBy: [{ date: 'desc' }, { id: 'desc' }]
-    }),
+    prisma.orm.public.Invoice.where((r) => qw(r, where)).include('supplier', (inc) => inc.select('id', 'code', 'nameAr')).orderBy([(r) => r.date.desc(), (r) => r.id.desc()]).all(),
     (prisma as any).purchaseReturn.findMany({
       where: req.query.supplierId ? { supplierId: Number(req.query.supplierId) } : {},
       orderBy: [{ date: 'desc' }, { id: 'desc' }]
@@ -344,24 +312,15 @@ router.get('/inventory', async (req, res) => {
   }
 
   const [items, stockMovements] = await Promise.all([
-    prisma.item.findMany({
-      where: itemWhere,
-      include: { category: true, unit: true },
-      orderBy: { code: 'asc' }
-    }),
-    prisma.stockMovement.findMany({
-      where:
-        req.query.dateFrom || req.query.dateTo
+    prisma.orm.public.Item.where((r) => qw(r, itemWhere)).include('category').include('unit').orderBy((r) => r.code.asc()).all(),
+    prisma.orm.public.StockMovement.where((r) => qw(r, req.query.dateFrom || req.query.dateTo
           ? {
               date: {
                 ...(req.query.dateFrom ? { gte: new Date(String(req.query.dateFrom)) } : {}),
                 ...(req.query.dateTo ? { lte: new Date(String(req.query.dateTo)) } : {})
               }
             }
-          : {},
-      orderBy: [{ date: 'desc' }, { id: 'desc' }],
-      take: 500
-    })
+          : {})).orderBy([(r) => r.date.desc(), (r) => r.id.desc()]).limit(500).all()
   ]);
 
   const summary = items.reduce(
@@ -381,8 +340,8 @@ router.get('/inventory', async (req, res) => {
 router.get('/aging', async (req, res) => {
   const type = String(req.query.type ?? 'customers').toLowerCase();
   const rows = type === 'suppliers'
-    ? await prisma.supplier.findMany({ select: { id: true, code: true, nameAr: true, currentBalance: true } })
-    : await prisma.customer.findMany({ select: { id: true, code: true, nameAr: true, currentBalance: true } });
+    ? await prisma.orm.public.Supplier.select('id', 'code', 'nameAr', 'currentBalance').all()
+    : await prisma.orm.public.Customer.select('id', 'code', 'nameAr', 'currentBalance').all();
 
   const data = rows.map((r) => {
     const balance = Number(r.currentBalance);

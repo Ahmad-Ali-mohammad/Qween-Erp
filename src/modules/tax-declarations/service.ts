@@ -1,3 +1,4 @@
+import { qw } from '../../utils/where';
 import { Prisma } from '@prisma/client';
 import { prisma } from '../../config/database';
 import { parseDateOrThrow } from '../../utils/date';
@@ -31,18 +32,14 @@ function parsePositiveInt(value: unknown, fieldName: string): number {
   return n;
 }
 
-async function findOpenPostingPeriod(tx: Prisma.TransactionClient, date: Date) {
-  const period = await tx.accountingPeriod.findFirst({
-    where: {
+async function findOpenPostingPeriod(tx: any, date: Date) {
+  const period = await tx.orm.public.AccountingPeriod.include('fiscalYear').orderBy([(r) => r.fiscalYearId.desc(), (r) => r.number.asc()]).first((r) => qw(r, {
       startDate: { lte: date },
       endDate: { gte: date },
       status: 'OPEN',
       canPost: true,
       fiscalYear: { status: 'OPEN' }
-    },
-    include: { fiscalYear: true },
-    orderBy: [{ fiscalYearId: 'desc' }, { number: 'asc' }]
-  });
+    }));
   if (!period) throw Errors.business('لا توجد فترة محاسبية مفتوحة بتاريخ السداد');
   return period;
 }
@@ -50,8 +47,8 @@ async function findOpenPostingPeriod(tx: Prisma.TransactionClient, date: Date) {
 export async function submitDeclaration(input: SubmitDeclarationInput) {
   const declarationId = parsePositiveInt(input.declarationId, 'declarationId');
 
-  return prisma.$transaction(async (tx) => {
-    const declaration = await tx.taxDeclaration.findUnique({ where: { id: declarationId } });
+  return prisma.transaction(async (tx) => {{
+    const declaration = await tx.orm.public.TaxDeclaration.first({ id: declarationId });
     if (!declaration) throw Errors.notFound('الإقرار الضريبي غير موجود');
     if (declaration.status === 'PAID') throw Errors.business('لا يمكن تقديم إقرار مدفوع');
     if (declaration.status === 'FILED') {
@@ -65,40 +62,34 @@ export async function submitDeclaration(input: SubmitDeclarationInput) {
     const filedDate = input.filedDate ? parseDateOrThrow(input.filedDate, 'filedDate') : new Date();
     const filedReference = String(input.filedReference ?? `FILED-${declarationId}`).trim() || `FILED-${declarationId}`;
 
-    const updated = await tx.taxDeclaration.update({
-      where: { id: declarationId },
-      data: {
+    const updated = await tx.orm.public.TaxDeclaration.where((r) => qw(r, { id: declarationId })).update({
         status: 'FILED',
         filedDate,
         filedReference,
         notes: declaration.notes
           ? `${declaration.notes}\nFiled by user ${input.userId} at ${filedDate.toISOString()}`
           : `Filed by user ${input.userId} at ${filedDate.toISOString()}`
-      }
-    });
+      }).then((r0) => r0!);
 
     return {
       duplicate: false,
       declaration: updated
     };
-  });
+  }});
 }
 
 export async function payDeclaration(input: PayDeclarationInput) {
   const declarationId = parsePositiveInt(input.declarationId, 'declarationId');
 
-  return prisma.$transaction(async (tx) => {
-    const declaration = await tx.taxDeclaration.findUnique({ where: { id: declarationId } });
+  return prisma.transaction(async (tx) => {{
+    const declaration = await tx.orm.public.TaxDeclaration.first({ id: declarationId });
     if (!declaration) throw Errors.notFound('الإقرار الضريبي غير موجود');
     if (declaration.status !== 'FILED' && declaration.status !== 'PAID') {
       throw Errors.business('يجب تقديم الإقرار قبل تسجيل السداد');
     }
 
     if (declaration.status === 'PAID') {
-      const existing = await tx.journalEntry.findFirst({
-        where: { reference: `TAX-DECL-PAY-${declarationId}`, status: 'POSTED' },
-        orderBy: { id: 'desc' }
-      });
+      const existing = await tx.orm.public.JournalEntry.orderBy((r) => r.id.desc()).first((r) => qw(r, { reference: `TAX-DECL-PAY-${declarationId}`, status: 'POSTED' }));
       return {
         duplicate: true,
         declaration,
@@ -118,7 +109,7 @@ export async function payDeclaration(input: PayDeclarationInput) {
 
     const cashAccountId = input.cashAccountId ? parsePositiveInt(input.cashAccountId, 'cashAccountId') : postingAccounts.cashAccountId;
     if (input.cashAccountId) {
-      const cashAccount = await tx.account.findUnique({ where: { id: cashAccountId } });
+      const cashAccount = await tx.orm.public.Account.first({ id: cashAccountId });
       if (!cashAccount || !cashAccount.isActive || !cashAccount.allowPosting) {
         throw Errors.business('حساب السداد غير صالح للترحيل');
       }
@@ -126,15 +117,12 @@ export async function payDeclaration(input: PayDeclarationInput) {
 
     const liabilityAccountId = postingAccounts.vatLiabilityAccountId;
     const reference = `TAX-DECL-PAY-${declarationId}`;
-    const existing = await tx.journalEntry.findFirst({
-      where: { reference, status: 'POSTED' },
-      orderBy: { id: 'desc' }
-    });
+    const existing = await tx.orm.public.JournalEntry.orderBy((r) => r.id.desc()).first({ reference, status: 'POSTED' });
 
     let entry = existing;
     if (!entry) {
       const year = paidDate.getUTCFullYear();
-      const count = await tx.journalEntry.count({ where: { entryNumber: { startsWith: `TAX-${year}-` } } });
+      const count = await tx.orm.public.JournalEntry.where((r) => qw(r, { entryNumber: { startsWith: `TAX-${year}-` } })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n);
       const entryNumber = buildSequentialNumber('TAX', count, year);
       const lines = [
         {
@@ -153,8 +141,7 @@ export async function payDeclaration(input: PayDeclarationInput) {
         }
       ];
 
-      entry = await tx.journalEntry.create({
-        data: {
+      entry = await tx.orm.public.JournalEntry.create({
           entryNumber,
           date: paidDate,
           periodId: period.id,
@@ -168,11 +155,10 @@ export async function payDeclaration(input: PayDeclarationInput) {
           postedById: input.userId,
           postedAt: new Date(),
           lines: { create: lines }
-        }
-      });
+        });
 
       await applyLedgerLines(
-        tx as unknown as Prisma.TransactionClient,
+        tx as unknown as any,
         paidDate,
         period.number,
         [
@@ -183,17 +169,14 @@ export async function payDeclaration(input: PayDeclarationInput) {
     }
 
     const paidReference = String(input.paidReference ?? `PAID-${declarationId}`).trim() || `PAID-${declarationId}`;
-    const updated = await tx.taxDeclaration.update({
-      where: { id: declarationId },
-      data: {
+    const updated = await tx.orm.public.TaxDeclaration.where((r) => qw(r, { id: declarationId })).update({
         status: 'PAID',
         paidDate,
         paidReference,
         notes: declaration.notes
           ? `${declaration.notes}\nPaid by user ${input.userId} at ${paidDate.toISOString()}`
           : `Paid by user ${input.userId} at ${paidDate.toISOString()}`
-      }
-    });
+      }).then((r0) => r0!);
 
     return {
       duplicate: Boolean(existing),
@@ -201,5 +184,5 @@ export async function payDeclaration(input: PayDeclarationInput) {
       journalEntryId: entry.id,
       journalEntryNumber: entry.entryNumber
     };
-  });
+  }});
 }

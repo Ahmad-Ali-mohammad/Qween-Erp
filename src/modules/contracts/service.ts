@@ -1,3 +1,4 @@
+import { qw } from '../../utils/where';
 import { prisma } from '../../config/database';
 import { enqueueOutboxEvent } from '../../platform/events/outbox';
 import { parseDateOrThrow } from '../../utils/date';
@@ -216,22 +217,12 @@ export async function listContracts(query: any) {
   }
 
   const [rows, total] = await Promise.all([
-    prisma.contract.findMany({
-      where,
-      skip: page.skip,
-      take: page.limit,
-      include: {
-        branch: {
-          select: { id: true, code: true, nameAr: true }
-        }
-      },
-      orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }]
-    }),
-    prisma.contract.count({ where })
+    prisma.orm.public.Contract.where((r) => qw(r, where)).include('branch', (inc) => inc.select('id', 'code', 'nameAr')).orderBy([(r) => r.updatedAt.desc(), (r) => r.id.desc()]).offset(page.skip).limit(page.limit).all(),
+    prisma.orm.public.Contract.where((r) => qw(r, where)).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n)
   ]);
 
   return {
-    rows: await prisma.$transaction((tx) => enrichContracts(tx, rows)),
+    rows: await prisma.transaction(async (tx) => enrichContracts(tx, rows)),
     meta: {
       page: page.page,
       limit: page.limit,
@@ -242,19 +233,18 @@ export async function listContracts(query: any) {
 }
 
 export async function getContract(id: number) {
-  return prisma.$transaction((tx) => fetchContract(tx, id));
+  return prisma.transaction(async (tx) => fetchContract(tx, id));
 }
 
 export async function createContract(data: any, userId: number) {
-  return prisma.$transaction(async (tx) => {
+  return prisma.transaction(async (tx) => {{
     const branchId = normalizePositiveInt(data.branchId, 'branchId', true);
     const partyType = normalizeStatus(data.partyType, 'CUSTOMER');
     const partyId = normalizePositiveInt(data.partyId, 'partyId', true);
 
     await Promise.all([ensureBranch(tx, branchId), ensureParty(tx, partyType, partyId)]);
 
-    const row = await tx.contract.create({
-      data: {
+    const row = await tx.orm.public.Contract.create({
         number: normalizeText(data.number) ?? (await generateContractNumber(tx)),
         branchId,
         title: String(data.title).trim(),
@@ -269,8 +259,7 @@ export async function createContract(data: any, userId: number) {
         postingStatus: 'NOT_APPLICABLE',
         terms: normalizeText(data.terms),
         attachmentsCount: Number(data.attachmentsCount ?? 0)
-      }
-    });
+      });
 
     await enqueueOutboxEvent(tx, {
       eventType: 'contracts.contract.created',
@@ -288,12 +277,12 @@ export async function createContract(data: any, userId: number) {
     });
 
     return fetchContract(tx, row.id);
-  });
+  }});
 }
 
 export async function updateContract(id: number, data: any, userId: number) {
-  return prisma.$transaction(async (tx) => {
-    const current = await tx.contract.findUnique({ where: { id } });
+  return prisma.transaction(async (tx) => {{
+    const current = await tx.orm.public.Contract.first({ id });
     if (!current) throw Errors.notFound('العقد غير موجود');
 
     const branchId = Object.prototype.hasOwnProperty.call(data, 'branchId')
@@ -308,9 +297,7 @@ export async function updateContract(id: number, data: any, userId: number) {
 
     await Promise.all([ensureBranch(tx, branchId), ensureParty(tx, partyType, partyId)]);
 
-    await tx.contract.update({
-      where: { id },
-      data: {
+    await tx.orm.public.Contract.where((r) => qw(r, { id })).update({
         number: Object.prototype.hasOwnProperty.call(data, 'number') ? normalizeText(data.number) ?? current.number : undefined,
         branchId,
         title: Object.prototype.hasOwnProperty.call(data, 'title') ? String(data.title).trim() : undefined,
@@ -327,8 +314,7 @@ export async function updateContract(id: number, data: any, userId: number) {
         attachmentsCount: Object.prototype.hasOwnProperty.call(data, 'attachmentsCount')
           ? Number(data.attachmentsCount ?? 0)
           : undefined
-      }
-    });
+      }).then((r0) => r0!);
 
     await enqueueOutboxEvent(tx, {
       eventType: 'contracts.contract.updated',
@@ -343,36 +329,33 @@ export async function updateContract(id: number, data: any, userId: number) {
     });
 
     return fetchContract(tx, id);
-  });
+  }});
 }
 
 export async function deleteContract(id: number) {
-  return prisma.$transaction(async (tx) => {
-    const current = await tx.contract.findUnique({ where: { id } });
+  return prisma.transaction(async (tx) => {{
+    const current = await tx.orm.public.Contract.first({ id });
     if (!current) throw Errors.notFound('العقد غير موجود');
 
-    const projectCount = await tx.project.count({ where: { contractId: id } });
+    const projectCount = await tx.orm.public.Project.where((r) => qw(r, { contractId: id })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n);
     if (projectCount > 0) throw Errors.business('لا يمكن حذف عقد مرتبط بمشاريع');
 
-    await tx.contractMilestone.deleteMany({ where: { contractId: id } });
-    await tx.contract.delete({ where: { id } });
+    await tx.orm.public.ContractMilestone.where((r) => qw(r, { contractId: id })).deleteAndCount().then((n0) => ({ count: n0 }));
+    await tx.orm.public.Contract.where((r) => qw(r, { id })).delete().then((r0) => r0!);
     return { deleted: true, id };
-  });
+  }});
 }
 
 export async function approveContract(id: number, userId: number) {
-  return prisma.$transaction(async (tx) => {
-    const current = await tx.contract.findUnique({ where: { id } });
+  return prisma.transaction(async (tx) => {{
+    const current = await tx.orm.public.Contract.first({ id });
     if (!current) throw Errors.notFound('العقد غير موجود');
     if (current.status !== 'DRAFT') throw Errors.business('العقد ليس في حالة مسودة');
 
-    await tx.contract.update({
-      where: { id },
-      data: {
+    await tx.orm.public.Contract.where((r) => qw(r, { id })).update({
         status: 'APPROVED',
         approvalStatus: 'APPROVED'
-      }
-    });
+      }).then((r0) => r0!);
 
     await enqueueOutboxEvent(tx, {
       eventType: 'contracts.contract.approved',
@@ -384,12 +367,12 @@ export async function approveContract(id: number, userId: number) {
     });
 
     return fetchContract(tx, id);
-  });
+  }});
 }
 
 export async function renewContract(id: number, months: number, userId: number) {
-  return prisma.$transaction(async (tx) => {
-    const current = await tx.contract.findUnique({ where: { id } });
+  return prisma.transaction(async (tx) => {{
+    const current = await tx.orm.public.Contract.first({ id });
     if (!current) throw Errors.notFound('العقد غير موجود');
     if (!['APPROVED', 'RENEWED'].includes(String(current.status).toUpperCase())) {
       throw Errors.business('لا يمكن تجديد عقد غير معتمد');
@@ -398,14 +381,11 @@ export async function renewContract(id: number, months: number, userId: number) 
     const nextEnd = current.endDate ? new Date(current.endDate) : new Date();
     nextEnd.setUTCMonth(nextEnd.getUTCMonth() + months);
 
-    await tx.contract.update({
-      where: { id },
-      data: {
+    await tx.orm.public.Contract.where((r) => qw(r, { id })).update({
         status: 'RENEWED',
         approvalStatus: 'APPROVED',
         endDate: nextEnd
-      }
-    });
+      }).then((r0) => r0!);
 
     await enqueueOutboxEvent(tx, {
       eventType: 'contracts.contract.renewed',
@@ -417,21 +397,18 @@ export async function renewContract(id: number, months: number, userId: number) 
     });
 
     return fetchContract(tx, id);
-  });
+  }});
 }
 
 export async function terminateContract(id: number, userId: number) {
-  return prisma.$transaction(async (tx) => {
-    const current = await tx.contract.findUnique({ where: { id } });
+  return prisma.transaction(async (tx) => {{
+    const current = await tx.orm.public.Contract.first({ id });
     if (!current) throw Errors.notFound('العقد غير موجود');
     if (String(current.status).toUpperCase() === 'TERMINATED') throw Errors.business('العقد منتهي بالفعل');
 
-    await tx.contract.update({
-      where: { id },
-      data: {
+    await tx.orm.public.Contract.where((r) => qw(r, { id })).update({
         status: 'TERMINATED'
-      }
-    });
+      }).then((r0) => r0!);
 
     await enqueueOutboxEvent(tx, {
       eventType: 'contracts.contract.terminated',
@@ -443,7 +420,7 @@ export async function terminateContract(id: number, userId: number) {
     });
 
     return fetchContract(tx, id);
-  });
+  }});
 }
 
 export async function listContractMilestones(contractId: number, query: any) {
@@ -452,17 +429,12 @@ export async function listContractMilestones(contractId: number, query: any) {
   if (query.status) where.status = String(query.status).toUpperCase();
 
   const [rows, total] = await Promise.all([
-    prisma.contractMilestone.findMany({
-      where,
-      skip: page.skip,
-      take: page.limit,
-      orderBy: [{ dueDate: 'asc' }, { id: 'asc' }]
-    }),
-    prisma.contractMilestone.count({ where })
+    prisma.orm.public.ContractMilestone.where((r) => qw(r, where)).orderBy([(r) => r.dueDate.asc(), (r) => r.id.asc()]).offset(page.skip).limit(page.limit).all(),
+    prisma.orm.public.ContractMilestone.where((r) => qw(r, where)).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n)
   ]);
 
   return {
-    rows: await prisma.$transaction((tx) => enrichMilestones(tx, rows)),
+    rows: await prisma.transaction(async (tx) => enrichMilestones(tx, rows)),
     meta: {
       page: page.page,
       limit: page.limit,
@@ -473,21 +445,19 @@ export async function listContractMilestones(contractId: number, query: any) {
 }
 
 export async function createContractMilestone(contractId: number, data: any, userId: number) {
-  return prisma.$transaction(async (tx) => {
-    const contract = await tx.contract.findUnique({ where: { id: contractId } });
+  return prisma.transaction(async (tx) => {{
+    const contract = await tx.orm.public.Contract.first({ id: contractId });
     if (!contract) throw Errors.notFound('العقد غير موجود');
     if (String(contract.status).toUpperCase() === 'TERMINATED') throw Errors.business('لا يمكن إضافة مرحلة إلى عقد منتهي');
 
-    const row = await tx.contractMilestone.create({
-      data: {
+    const row = await tx.orm.public.ContractMilestone.create({
         contractId,
         title: String(data.title).trim(),
         dueDate: data.dueDate ? parseDateOrThrow(data.dueDate, 'dueDate') : null,
         amount: normalizeAmount(data.amount, 'amount') ?? 0,
         status: normalizeStatus(data.status, 'PENDING'),
         notes: normalizeText(data.notes)
-      }
-    });
+      });
 
     await enqueueOutboxEvent(tx, {
       eventType: 'contracts.milestone.created',
@@ -499,19 +469,17 @@ export async function createContractMilestone(contractId: number, data: any, use
     });
 
     return fetchMilestone(tx, row.id);
-  });
+  }});
 }
 
 export async function updateContractMilestone(id: number, data: any, userId: number) {
-  return prisma.$transaction(async (tx) => {
-    const current = await tx.contractMilestone.findUnique({ where: { id } });
+  return prisma.transaction(async (tx) => {{
+    const current = await tx.orm.public.ContractMilestone.first({ id });
     if (!current) throw Errors.notFound('المرحلة التعاقدية غير موجودة');
-    const contract = await tx.contract.findUnique({ where: { id: current.contractId } });
+    const contract = await tx.orm.public.Contract.first({ id: current.contractId });
     if (!contract) throw Errors.notFound('العقد غير موجود');
 
-    await tx.contractMilestone.update({
-      where: { id },
-      data: {
+    await tx.orm.public.ContractMilestone.where((r) => qw(r, { id })).update({
         title: Object.prototype.hasOwnProperty.call(data, 'title') ? String(data.title).trim() : undefined,
         dueDate: Object.prototype.hasOwnProperty.call(data, 'dueDate')
           ? (data.dueDate ? parseDateOrThrow(data.dueDate, 'dueDate') : null)
@@ -519,8 +487,7 @@ export async function updateContractMilestone(id: number, data: any, userId: num
         amount: Object.prototype.hasOwnProperty.call(data, 'amount') ? normalizeAmount(data.amount, 'amount') ?? 0 : undefined,
         status: Object.prototype.hasOwnProperty.call(data, 'status') ? normalizeStatus(data.status, current.status) : undefined,
         notes: Object.prototype.hasOwnProperty.call(data, 'notes') ? normalizeText(data.notes) : undefined
-      }
-    });
+      }).then((r0) => r0!);
 
     await enqueueOutboxEvent(tx, {
       eventType: 'contracts.milestone.updated',
@@ -535,16 +502,16 @@ export async function updateContractMilestone(id: number, data: any, userId: num
     });
 
     return fetchMilestone(tx, id);
-  });
+  }});
 }
 
 export async function deleteContractMilestone(id: number, userId: number) {
-  return prisma.$transaction(async (tx) => {
-    const current = await tx.contractMilestone.findUnique({ where: { id } });
+  return prisma.transaction(async (tx) => {{
+    const current = await tx.orm.public.ContractMilestone.first({ id });
     if (!current) throw Errors.notFound('المرحلة التعاقدية غير موجودة');
-    const contract = await tx.contract.findUnique({ where: { id: current.contractId } });
+    const contract = await tx.orm.public.Contract.first({ id: current.contractId });
 
-    await tx.contractMilestone.delete({ where: { id } });
+    await tx.orm.public.ContractMilestone.where((r) => qw(r, { id })).delete().then((r0) => r0!);
 
     await enqueueOutboxEvent(tx, {
       eventType: 'contracts.milestone.deleted',
@@ -556,26 +523,23 @@ export async function deleteContractMilestone(id: number, userId: number) {
     });
 
     return { deleted: true, id };
-  });
+  }});
 }
 
 export async function completeContractMilestone(id: number, userId: number) {
-  return prisma.$transaction(async (tx) => {
-    const current = await tx.contractMilestone.findUnique({ where: { id } });
+  return prisma.transaction(async (tx) => {{
+    const current = await tx.orm.public.ContractMilestone.first({ id });
     if (!current) throw Errors.notFound('المرحلة التعاقدية غير موجودة');
     if (String(current.status).toUpperCase() === 'COMPLETED') throw Errors.business('المرحلة مكتملة بالفعل');
 
-    const contract = await tx.contract.findUnique({ where: { id: current.contractId } });
+    const contract = await tx.orm.public.Contract.first({ id: current.contractId });
     if (!contract || !['APPROVED', 'RENEWED'].includes(String(contract.status).toUpperCase())) {
       throw Errors.business('لا يمكن إكمال مرحلة لعقد غير معتمد');
     }
 
-    await tx.contractMilestone.update({
-      where: { id },
-      data: {
+    await tx.orm.public.ContractMilestone.where((r) => qw(r, { id })).update({
         status: 'COMPLETED'
-      }
-    });
+      }).then((r0) => r0!);
 
     await enqueueOutboxEvent(tx, {
       eventType: 'contracts.milestone.completed',
@@ -587,5 +551,5 @@ export async function completeContractMilestone(id: number, userId: number) {
     });
 
     return fetchMilestone(tx, id);
-  });
+  }});
 }

@@ -1,4 +1,5 @@
 ﻿import { Router } from 'express';
+import { qw } from '../../utils/where';
 import { z } from 'zod';
 import { prisma } from '../../config/database';
 import { authenticate } from '../../middleware/auth';
@@ -57,31 +58,30 @@ router.use(authenticate);
 router.use('/dashboard', buildSystemDashboardRouter('assets'));
 
 router.get('/categories', requirePermissions(PERMISSIONS.ASSETS_READ), async (_req, res) => {
-  const rows = await prisma.assetCategory.findMany({ orderBy: { id: 'desc' } });
+  const rows = await prisma.orm.public.AssetCategory.orderBy((r) => r.id.desc()).all();
   ok(res, rows);
 });
 
 router.post('/categories', requirePermissions(PERMISSIONS.ASSETS_WRITE), validateBody(categorySchema), audit('asset_categories'), async (req, res) => {
-  const row = await prisma.assetCategory.create({ data: req.body });
+  const row = await prisma.orm.public.AssetCategory.create(req.body);
   ok(res, row, undefined, 201);
 });
 
 router.put('/categories/:id', requirePermissions(PERMISSIONS.ASSETS_WRITE), validateBody(categorySchema.partial()), audit('asset_categories'), async (req, res) => {
-  const row = await prisma.assetCategory.update({ where: { id: Number(req.params.id) }, data: req.body });
+  const row = await prisma.orm.public.AssetCategory.where((r) => qw(r, { id: Number(req.params.id) })).update(req.body).then((r0) => r0!);
   ok(res, row);
 });
 
 router.get('/', requirePermissions(PERMISSIONS.ASSETS_READ), async (_req, res) => {
-  const rows = await prisma.fixedAsset.findMany({ include: { category: true }, orderBy: { id: 'desc' } });
+  const rows = await prisma.orm.public.FixedAsset.include('category').orderBy((r) => r.id.desc()).all();
   ok(res, rows);
 });
 
 router.post('/', requirePermissions(PERMISSIONS.ASSETS_WRITE), validateBody(assetSchema), audit('fixed_assets'), async (req, res) => {
-  const category = await prisma.assetCategory.findUnique({ where: { id: req.body.categoryId } });
+  const category = await prisma.orm.public.AssetCategory.first((r) => qw(r, { id: req.body.categoryId }));
   if (!category) throw Errors.notFound('فئة الأصل غير موجودة');
 
-  const row = await prisma.fixedAsset.create({
-    data: {
+  const row = await prisma.orm.public.FixedAsset.create({
       ...req.body,
       purchaseDate: req.body.purchaseDate ? new Date(req.body.purchaseDate) : new Date(),
       usefulLifeMonths: req.body.usefulLifeMonths ?? category.usefulLifeMonths,
@@ -92,36 +92,32 @@ router.post('/', requirePermissions(PERMISSIONS.ASSETS_WRITE), validateBody(asse
       netBookValue: req.body.purchaseCost,
       status: 'ACTIVE',
       isDepreciating: true
-    }
-  });
+    });
 
   ok(res, row, undefined, 201);
 });
 
 router.get('/:id', requirePermissions(PERMISSIONS.ASSETS_READ), async (req, res) => {
-  const row = await prisma.fixedAsset.findUnique({
-    where: { id: Number(req.params.id) },
-    include: { category: true, depreciationSchedule: { orderBy: [{ fiscalYear: 'desc' }, { period: 'desc' }] } }
-  });
+  const row = await prisma.orm.public.FixedAsset.include('category').include('depreciationSchedule', (inc) => inc.orderBy([(r) => r.fiscalYear.desc(), (r) => r.period.desc()])).first((r) => qw(r, { id: Number(req.params.id) }));
   ok(res, row);
 });
 
 router.put('/:id', requirePermissions(PERMISSIONS.ASSETS_WRITE), validateBody(assetSchema.partial()), audit('fixed_assets'), async (req, res) => {
   const data = { ...req.body } as any;
   if (data.purchaseDate) data.purchaseDate = new Date(data.purchaseDate);
-  const row = await prisma.fixedAsset.update({ where: { id: Number(req.params.id) }, data });
+  const row = await prisma.orm.public.FixedAsset.where((r) => qw(r, { id: Number(req.params.id) })).update(data).then((r0) => r0!);
   ok(res, row);
 });
 
 router.delete('/:id', requirePermissions(PERMISSIONS.ASSETS_WRITE), audit('fixed_assets'), async (req, res) => {
   const id = Number(req.params.id);
-  const schedules = await prisma.depreciationSchedule.count({ where: { assetId: id } });
+  const schedules = await prisma.orm.public.DepreciationSchedule.where((r) => qw(r, { assetId: id })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n);
   if (schedules > 0) {
-    const row = await prisma.fixedAsset.update({ where: { id }, data: { status: 'SCRAPPED', isDepreciating: false } });
+    const row = await prisma.orm.public.FixedAsset.where((r) => qw(r, { id })).update({ status: 'SCRAPPED', isDepreciating: false }).then((r0) => r0!);
     ok(res, { archived: true, asset: row });
     return;
   }
-  await prisma.fixedAsset.delete({ where: { id } });
+  await prisma.orm.public.FixedAsset.where((r) => qw(r, { id })).delete().then((r0) => r0!);
   ok(res, { deleted: true });
 });
 

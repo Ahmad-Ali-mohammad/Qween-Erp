@@ -1,3 +1,4 @@
+import { qw } from '../../utils/where';
 import { prisma } from '../../config/database';
 import { enqueueOutboxEvent } from '../../platform/events/outbox';
 import { parseDateOrThrow } from '../../utils/date';
@@ -281,7 +282,7 @@ export async function listDailyLogs(query: any) {
       },
       orderBy: [{ logDate: 'desc' }, { id: 'desc' }]
     }),
-    prisma.siteDailyLog.count({ where })
+    prisma.orm.public.SiteDailyLog.where((r) => qw(r, where)).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n)
   ]);
 
   return {
@@ -296,11 +297,11 @@ export async function listDailyLogs(query: any) {
 }
 
 export async function getDailyLog(id: number) {
-  return prisma.$transaction((tx) => fetchDailyLog(tx, id));
+  return prisma.transaction(async (tx) => fetchDailyLog(tx, id));
 }
 
 export async function createDailyLog(data: any, userId: number) {
-  return prisma.$transaction(async (tx) => {
+  return prisma.transaction(async (tx) => {{
     const projectId = Number(data.projectId);
     if (!projectId) throw Errors.validation('يجب تحديد المشروع');
     const project = await ensureProject(tx, projectId);
@@ -309,8 +310,7 @@ export async function createDailyLog(data: any, userId: number) {
       throw Errors.business('الفرع المختار لا يطابق فرع المشروع');
     }
 
-    const row = await tx.siteDailyLog.create({
-      data: {
+    const row = await tx.orm.public.SiteDailyLog.create({
         number: data.number ?? (await generateNumber(tx, 'siteDailyLog', 'SDL')),
         branchId,
         projectId,
@@ -325,8 +325,7 @@ export async function createDailyLog(data: any, userId: number) {
         postingStatus: 'NOT_APPLICABLE',
         createdById: userId,
         updatedById: userId
-      }
-    });
+      });
 
     await enqueueOutboxEvent(tx, {
       eventType: 'site-ops.daily-log.created',
@@ -344,12 +343,12 @@ export async function createDailyLog(data: any, userId: number) {
     });
 
     return fetchDailyLog(tx, row.id);
-  });
+  }});
 }
 
 export async function updateDailyLog(id: number, data: any, userId: number) {
-  return prisma.$transaction(async (tx) => {
-    const current = await tx.siteDailyLog.findUnique({ where: { id } });
+  return prisma.transaction(async (tx) => {{
+    const current = await tx.orm.public.SiteDailyLog.first({ id });
     if (!current) throw Errors.notFound('اليومية الميدانية غير موجودة');
     if (current.approvalStatus === 'APPROVED') throw Errors.business('لا يمكن تعديل يومية معتمدة');
 
@@ -357,9 +356,7 @@ export async function updateDailyLog(id: number, data: any, userId: number) {
     const project = await ensureProject(tx, targetProjectId);
     const branchId = Number(data.branchId ?? current.branchId ?? project.branchId ?? 0) || null;
 
-    await tx.siteDailyLog.update({
-      where: { id },
-      data: {
+    await tx.orm.public.SiteDailyLog.where((r) => qw(r, { id })).update({
         branchId,
         projectId: targetProjectId,
         logDate: data.logDate ? normalizeDateOnly(data.logDate, 'logDate') : current.logDate,
@@ -369,8 +366,7 @@ export async function updateDailyLog(id: number, data: any, userId: number) {
         workExecuted: data.workExecuted !== undefined ? toText(data.workExecuted) : current.workExecuted,
         blockers: data.blockers !== undefined ? toText(data.blockers) : current.blockers,
         updatedById: userId
-      }
-    });
+      }).then((r0) => r0!);
 
     await enqueueOutboxEvent(tx, {
       eventType: 'site-ops.daily-log.updated',
@@ -386,24 +382,21 @@ export async function updateDailyLog(id: number, data: any, userId: number) {
     });
 
     return fetchDailyLog(tx, id);
-  });
+  }});
 }
 
 export async function submitDailyLog(id: number, userId: number) {
-  return prisma.$transaction(async (tx) => {
-    const current = await tx.siteDailyLog.findUnique({ where: { id } });
+  return prisma.transaction(async (tx) => {{
+    const current = await tx.orm.public.SiteDailyLog.first({ id });
     if (!current) throw Errors.notFound('اليومية الميدانية غير موجودة');
     if (current.status === 'SUBMITTED' || current.approvalStatus === 'PENDING') return fetchDailyLog(tx, id);
 
-    await tx.siteDailyLog.update({
-      where: { id },
-      data: {
+    await tx.orm.public.SiteDailyLog.where((r) => qw(r, { id })).update({
         status: 'SUBMITTED',
         approvalStatus: 'PENDING',
         submittedAt: new Date(),
         updatedById: userId
-      }
-    });
+      }).then((r0) => r0!);
 
     await enqueueOutboxEvent(tx, {
       eventType: 'site-ops.daily-log.submitted',
@@ -420,27 +413,24 @@ export async function submitDailyLog(id: number, userId: number) {
     });
 
     return fetchDailyLog(tx, id);
-  });
+  }});
 }
 
 export async function approveDailyLog(id: number, userId: number) {
-  return prisma.$transaction(async (tx) => {
-    const current = await tx.siteDailyLog.findUnique({ where: { id } });
+  return prisma.transaction(async (tx) => {{
+    const current = await tx.orm.public.SiteDailyLog.first({ id });
     if (!current) throw Errors.notFound('اليومية الميدانية غير موجودة');
     if (current.approvalStatus === 'APPROVED') return fetchDailyLog(tx, id);
     if (current.status !== 'SUBMITTED' && current.approvalStatus !== 'PENDING') {
       throw Errors.business('يجب إرسال اليومية قبل الاعتماد');
     }
 
-    await tx.siteDailyLog.update({
-      where: { id },
-      data: {
+    await tx.orm.public.SiteDailyLog.where((r) => qw(r, { id })).update({
         status: 'APPROVED',
         approvalStatus: 'APPROVED',
         approvedAt: new Date(),
         updatedById: userId
-      }
-    });
+      }).then((r0) => r0!);
 
     await enqueueOutboxEvent(tx, {
       eventType: 'site-ops.daily-log.approved',
@@ -457,7 +447,7 @@ export async function approveDailyLog(id: number, userId: number) {
     });
 
     return fetchDailyLog(tx, id);
-  });
+  }});
 }
 
 export async function listMaterialRequests(query: any) {
@@ -482,20 +472,8 @@ export async function listMaterialRequests(query: any) {
   }
 
   const [rows, total] = await Promise.all([
-    prisma.siteMaterialRequest.findMany({
-      where,
-      skip: pageState.skip,
-      take: pageState.limit,
-      include: {
-        branch: { select: { id: true, code: true, nameAr: true } },
-        project: { select: { id: true, code: true, nameAr: true } },
-        dailyLog: { select: { id: true, number: true, logDate: true } },
-        item: { select: { id: true, code: true, nameAr: true, onHandQty: true, purchasePrice: true } },
-        warehouse: { select: { id: true, code: true, nameAr: true } }
-      },
-      orderBy: [{ requestDate: 'desc' }, { id: 'desc' }]
-    }),
-    prisma.siteMaterialRequest.count({ where })
+    prisma.orm.public.SiteMaterialRequest.where((r) => qw(r, where)).include('branch', (inc) => inc.select('id', 'code', 'nameAr')).include('project', (inc) => inc.select('id', 'code', 'nameAr')).include('dailyLog', (inc) => inc.select('id', 'number', 'logDate')).include('item', (inc) => inc.select('id', 'code', 'nameAr', 'onHandQty', 'purchasePrice')).include('warehouse', (inc) => inc.select('id', 'code', 'nameAr')).orderBy([(r) => r.requestDate.desc(), (r) => r.id.desc()]).offset(pageState.skip).limit(pageState.limit).all(),
+    prisma.orm.public.SiteMaterialRequest.where((r) => qw(r, where)).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n)
   ]);
 
   return {
@@ -510,11 +488,11 @@ export async function listMaterialRequests(query: any) {
 }
 
 export async function getMaterialRequest(id: number) {
-  return prisma.$transaction((tx) => fetchMaterialRequest(tx, id));
+  return prisma.transaction(async (tx) => fetchMaterialRequest(tx, id));
 }
 
 export async function createMaterialRequest(data: any, userId: number) {
-  return prisma.$transaction(async (tx) => {
+  return prisma.transaction(async (tx) => {{
     const projectId = Number(data.projectId);
     if (!projectId) throw Errors.validation('يجب تحديد المشروع');
     const project = await ensureProject(tx, projectId);
@@ -523,7 +501,7 @@ export async function createMaterialRequest(data: any, userId: number) {
 
     const dailyLogId = Number(data.dailyLogId ?? 0) || null;
     if (dailyLogId) {
-      const dailyLog = await tx.siteDailyLog.findUnique({ where: { id: dailyLogId }, select: { id: true, projectId: true } });
+      const dailyLog = await tx.orm.public.SiteDailyLog.select('id', 'projectId').first({ id: dailyLogId });
       if (!dailyLog) throw Errors.notFound('اليومية المرتبطة غير موجودة');
       if (Number(dailyLog.projectId) !== projectId) throw Errors.business('اليومية لا تنتمي لنفس المشروع');
     }
@@ -535,8 +513,7 @@ export async function createMaterialRequest(data: any, userId: number) {
 
     const sourceMode = String(data.sourceMode ?? (itemId && warehouseId ? 'STOCK' : 'PROCUREMENT')).toUpperCase();
 
-    const row = await tx.siteMaterialRequest.create({
-      data: {
+    const row = await tx.orm.public.SiteMaterialRequest.create({
         number: data.number ?? (await generateNumber(tx, 'siteMaterialRequest', 'SMR')),
         branchId,
         projectId,
@@ -556,8 +533,7 @@ export async function createMaterialRequest(data: any, userId: number) {
         notes: toText(data.notes),
         createdById: userId,
         updatedById: userId
-      }
-    });
+      });
 
     await enqueueOutboxEvent(tx, {
       eventType: 'site-ops.material-request.created',
@@ -577,12 +553,12 @@ export async function createMaterialRequest(data: any, userId: number) {
     });
 
     return fetchMaterialRequest(tx, row.id);
-  });
+  }});
 }
 
 export async function updateMaterialRequest(id: number, data: any, userId: number) {
-  return prisma.$transaction(async (tx) => {
-    const current = await tx.siteMaterialRequest.findUnique({ where: { id } });
+  return prisma.transaction(async (tx) => {{
+    const current = await tx.orm.public.SiteMaterialRequest.first({ id });
     if (!current) throw Errors.notFound('طلب المواد غير موجود');
     if (current.status === 'FULFILLED' || Number(current.issuedQuantity ?? 0) > 0) {
       throw Errors.business('لا يمكن تعديل طلب مواد بعد بدء الصرف');
@@ -600,14 +576,12 @@ export async function updateMaterialRequest(id: number, data: any, userId: numbe
     const quantity = data.quantity !== undefined ? toPositiveNumber(data.quantity, 'الكمية المطلوبة') : Number(current.quantity);
     const dailyLogId = data.dailyLogId !== undefined ? Number(data.dailyLogId || 0) || null : current.dailyLogId;
     if (dailyLogId) {
-      const dailyLog = await tx.siteDailyLog.findUnique({ where: { id: dailyLogId }, select: { id: true, projectId: true } });
+      const dailyLog = await tx.orm.public.SiteDailyLog.select('id', 'projectId').first({ id: dailyLogId });
       if (!dailyLog) throw Errors.notFound('اليومية المرتبطة غير موجودة');
       if (Number(dailyLog.projectId) !== projectId) throw Errors.business('اليومية لا تنتمي لنفس المشروع');
     }
 
-    await tx.siteMaterialRequest.update({
-      where: { id },
-      data: {
+    await tx.orm.public.SiteMaterialRequest.where((r) => qw(r, { id })).update({
         branchId,
         projectId,
         dailyLogId,
@@ -621,8 +595,7 @@ export async function updateMaterialRequest(id: number, data: any, userId: numbe
         sourceMode: data.sourceMode !== undefined ? String(data.sourceMode).toUpperCase() : current.sourceMode,
         notes: data.notes !== undefined ? toText(data.notes) : current.notes,
         updatedById: userId
-      }
-    });
+      }).then((r0) => r0!);
 
     await enqueueOutboxEvent(tx, {
       eventType: 'site-ops.material-request.updated',
@@ -641,24 +614,21 @@ export async function updateMaterialRequest(id: number, data: any, userId: numbe
     });
 
     return fetchMaterialRequest(tx, id);
-  });
+  }});
 }
 
 export async function submitMaterialRequest(id: number, userId: number) {
-  return prisma.$transaction(async (tx) => {
-    const current = await tx.siteMaterialRequest.findUnique({ where: { id } });
+  return prisma.transaction(async (tx) => {{
+    const current = await tx.orm.public.SiteMaterialRequest.first({ id });
     if (!current) throw Errors.notFound('طلب المواد غير موجود');
     if (current.status === 'SUBMITTED' || current.approvalStatus === 'PENDING') return fetchMaterialRequest(tx, id);
 
-    await tx.siteMaterialRequest.update({
-      where: { id },
-      data: {
+    await tx.orm.public.SiteMaterialRequest.where((r) => qw(r, { id })).update({
         status: 'SUBMITTED',
         approvalStatus: 'PENDING',
         submittedAt: new Date(),
         updatedById: userId
-      }
-    });
+      }).then((r0) => r0!);
 
     await enqueueOutboxEvent(tx, {
       eventType: 'site-ops.material-request.submitted',
@@ -678,27 +648,24 @@ export async function submitMaterialRequest(id: number, userId: number) {
     });
 
     return fetchMaterialRequest(tx, id);
-  });
+  }});
 }
 
 export async function approveMaterialRequest(id: number, userId: number) {
-  return prisma.$transaction(async (tx) => {
-    const current = await tx.siteMaterialRequest.findUnique({ where: { id } });
+  return prisma.transaction(async (tx) => {{
+    const current = await tx.orm.public.SiteMaterialRequest.first({ id });
     if (!current) throw Errors.notFound('طلب المواد غير موجود');
     if (current.approvalStatus === 'APPROVED') return fetchMaterialRequest(tx, id);
     if (current.status !== 'SUBMITTED' && current.approvalStatus !== 'PENDING') {
       throw Errors.business('يجب إرسال الطلب قبل الاعتماد');
     }
 
-    const updated = await tx.siteMaterialRequest.update({
-      where: { id },
-      data: {
+    const updated = await tx.orm.public.SiteMaterialRequest.where((r) => qw(r, { id })).update({
         status: 'APPROVED',
         approvalStatus: 'APPROVED',
         approvedAt: new Date(),
         updatedById: userId
-      }
-    });
+      }).then((r0) => r0!);
 
     await enqueueOutboxEvent(tx, {
       eventType: 'site-ops.material-request.approved',
@@ -721,13 +688,10 @@ export async function approveMaterialRequest(id: number, userId: number) {
       const item = await ensureItem(tx, updated.itemId);
       const remaining = Math.max(0, Number(updated.quantity) - Number(updated.issuedQuantity));
       if (Number(item.onHandQty ?? 0) < remaining) {
-        await tx.siteMaterialRequest.update({
-          where: { id },
-          data: {
+        await tx.orm.public.SiteMaterialRequest.where((r) => qw(r, { id })).update({
             sourceMode: updated.sourceMode === 'STOCK' ? 'MIXED' : updated.sourceMode,
             notes: [updated.notes, 'Auto: stock shortage detected, procurement escalation required'].filter(Boolean).join('\n')
-          }
-        });
+          }).then((r0) => r0!);
         await enqueueOutboxEvent(tx, {
           eventType: 'site-ops.material-request.procurement-needed',
           aggregateType: 'SiteMaterialRequest',
@@ -747,12 +711,12 @@ export async function approveMaterialRequest(id: number, userId: number) {
     }
 
     return fetchMaterialRequest(tx, id);
-  });
+  }});
 }
 
 export async function fulfillMaterialRequest(id: number, data: any, userId: number) {
-  return prisma.$transaction(async (tx) => {
-    const current = await tx.siteMaterialRequest.findUnique({ where: { id } });
+  return prisma.transaction(async (tx) => {{
+    const current = await tx.orm.public.SiteMaterialRequest.first({ id });
     if (!current) throw Errors.notFound('طلب المواد غير موجود');
     if (current.approvalStatus !== 'APPROVED') throw Errors.business('يجب اعتماد الطلب قبل الصرف');
     if (!current.itemId || !current.warehouseId) throw Errors.business('لا يمكن صرف مواد بدون تحديد الصنف والمستودع');
@@ -792,8 +756,7 @@ export async function fulfillMaterialRequest(id: number, data: any, userId: numb
     const totalCost = roundAmount(issuedQuantity * unitCost);
     const issueDate = data.issueDate ? normalizeDateOnly(data.issueDate, 'issueDate') : new Date();
 
-    await tx.stockMovement.create({
-      data: {
+    await tx.orm.public.StockMovement.create({
         date: issueDate,
         type: 'ISSUE_SITE',
         reference: current.number,
@@ -803,42 +766,32 @@ export async function fulfillMaterialRequest(id: number, data: any, userId: numb
         unitCost,
         totalCost,
         notes: toText(data.notes) ?? 'Issue from site operations material request'
-      }
-    });
+      });
 
     const nextIssuedQuantity = roundAmount(alreadyIssued + issuedQuantity);
     const isFullyFulfilled = nextIssuedQuantity >= requestedQty - 0.0001;
     const nextOnHand = roundAmount(available - issuedQuantity);
     const nextInventoryValue = roundAmount(Math.max(0, Number(item.inventoryValue ?? 0) - totalCost));
 
-    await tx.item.update({
-      where: { id: item.id },
-      data: {
+    await tx.orm.public.Item.where((r) => qw(r, { id: item.id })).update({
         onHandQty: nextOnHand,
         inventoryValue: nextInventoryValue
-      }
-    });
+      }).then((r0) => r0!);
 
-    await tx.siteMaterialRequest.update({
-      where: { id },
-      data: {
+    await tx.orm.public.SiteMaterialRequest.where((r) => qw(r, { id })).update({
         issuedQuantity: nextIssuedQuantity,
         status: isFullyFulfilled ? 'FULFILLED' : 'PARTIAL',
         postingStatus: isFullyFulfilled ? 'POSTED' : 'UNPOSTED',
         fulfilledAt: isFullyFulfilled ? new Date() : null,
         notes: [current.notes, toText(data.notes)].filter(Boolean).join('\n'),
         updatedById: userId
-      }
-    });
+      }).then((r0) => r0!);
 
-    await tx.project.update({
-      where: { id: current.projectId },
-      data: {
+    await tx.orm.public.Project.where((r) => qw(r, { id: current.projectId })).update({
         actualCost: {
           increment: totalCost
         }
-      }
-    });
+      }).then((r0) => r0!);
 
     await enqueueOutboxEvent(tx, {
       eventType: 'site-ops.material-request.fulfilled',
@@ -861,7 +814,7 @@ export async function fulfillMaterialRequest(id: number, data: any, userId: numb
     });
 
     return fetchMaterialRequest(tx, id);
-  });
+  }});
 }
 
 export async function listProgress(query: any) {
@@ -877,18 +830,8 @@ export async function listProgress(query: any) {
   }
 
   const [rows, total] = await Promise.all([
-    prisma.siteProgress.findMany({
-      where,
-      skip: pageState.skip,
-      take: pageState.limit,
-      include: {
-        branch: { select: { id: true, code: true, nameAr: true } },
-        project: { select: { id: true, code: true, nameAr: true } },
-        dailyLog: { select: { id: true, number: true, logDate: true } }
-      },
-      orderBy: [{ reportDate: 'desc' }, { id: 'desc' }]
-    }),
-    prisma.siteProgress.count({ where })
+    prisma.orm.public.SiteProgress.where((r) => qw(r, where)).include('branch', (inc) => inc.select('id', 'code', 'nameAr')).include('project', (inc) => inc.select('id', 'code', 'nameAr')).include('dailyLog', (inc) => inc.select('id', 'number', 'logDate')).orderBy([(r) => r.reportDate.desc(), (r) => r.id.desc()]).offset(pageState.skip).limit(pageState.limit).all(),
+    prisma.orm.public.SiteProgress.where((r) => qw(r, where)).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n)
   ]);
 
   return {
@@ -903,11 +846,11 @@ export async function listProgress(query: any) {
 }
 
 export async function getProgress(id: number) {
-  return prisma.$transaction((tx) => fetchProgress(tx, id));
+  return prisma.transaction(async (tx) => fetchProgress(tx, id));
 }
 
 export async function createProgress(data: any, userId: number) {
-  return prisma.$transaction(async (tx) => {
+  return prisma.transaction(async (tx) => {{
     const projectId = Number(data.projectId);
     if (!projectId) throw Errors.validation('يجب تحديد المشروع');
     const project = await ensureProject(tx, projectId);
@@ -915,13 +858,12 @@ export async function createProgress(data: any, userId: number) {
 
     const dailyLogId = Number(data.dailyLogId ?? 0) || null;
     if (dailyLogId) {
-      const dailyLog = await tx.siteDailyLog.findUnique({ where: { id: dailyLogId }, select: { id: true, projectId: true } });
+      const dailyLog = await tx.orm.public.SiteDailyLog.select('id', 'projectId').first({ id: dailyLogId });
       if (!dailyLog) throw Errors.notFound('اليومية المرتبطة غير موجودة');
       if (Number(dailyLog.projectId) !== projectId) throw Errors.business('اليومية لا تنتمي لنفس المشروع');
     }
 
-    const row = await tx.siteProgress.create({
-      data: {
+    const row = await tx.orm.public.SiteProgress.create({
         branchId,
         projectId,
         dailyLogId,
@@ -938,8 +880,7 @@ export async function createProgress(data: any, userId: number) {
         notes: toText(data.notes),
         createdById: userId,
         updatedById: userId
-      }
-    });
+      });
 
     await enqueueOutboxEvent(tx, {
       eventType: 'site-ops.progress.created',
@@ -959,12 +900,12 @@ export async function createProgress(data: any, userId: number) {
     });
 
     return fetchProgress(tx, row.id);
-  });
+  }});
 }
 
 export async function updateProgress(id: number, data: any, userId: number) {
-  return prisma.$transaction(async (tx) => {
-    const current = await tx.siteProgress.findUnique({ where: { id } });
+  return prisma.transaction(async (tx) => {{
+    const current = await tx.orm.public.SiteProgress.first({ id });
     if (!current) throw Errors.notFound('تقرير التقدم غير موجود');
 
     const projectId = Number(data.projectId ?? current.projectId);
@@ -973,14 +914,12 @@ export async function updateProgress(id: number, data: any, userId: number) {
 
     const dailyLogId = data.dailyLogId !== undefined ? Number(data.dailyLogId || 0) || null : current.dailyLogId;
     if (dailyLogId) {
-      const dailyLog = await tx.siteDailyLog.findUnique({ where: { id: dailyLogId }, select: { id: true, projectId: true } });
+      const dailyLog = await tx.orm.public.SiteDailyLog.select('id', 'projectId').first({ id: dailyLogId });
       if (!dailyLog) throw Errors.notFound('اليومية المرتبطة غير موجودة');
       if (Number(dailyLog.projectId) !== projectId) throw Errors.business('اليومية لا تنتمي لنفس المشروع');
     }
 
-    await tx.siteProgress.update({
-      where: { id },
-      data: {
+    await tx.orm.public.SiteProgress.where((r) => qw(r, { id })).update({
         branchId,
         projectId,
         dailyLogId,
@@ -994,8 +933,7 @@ export async function updateProgress(id: number, data: any, userId: number) {
         status: data.status !== undefined ? String(data.status).toUpperCase() : current.status,
         notes: data.notes !== undefined ? toText(data.notes) : current.notes,
         updatedById: userId
-      }
-    });
+      }).then((r0) => r0!);
 
     await enqueueOutboxEvent(tx, {
       eventType: 'site-ops.progress.updated',
@@ -1012,7 +950,7 @@ export async function updateProgress(id: number, data: any, userId: number) {
     });
 
     return fetchProgress(tx, id);
-  });
+  }});
 }
 
 export async function listIssues(query: any) {
@@ -1035,18 +973,8 @@ export async function listIssues(query: any) {
   }
 
   const [rows, total] = await Promise.all([
-    prisma.siteIssue.findMany({
-      where,
-      skip: pageState.skip,
-      take: pageState.limit,
-      include: {
-        branch: { select: { id: true, code: true, nameAr: true } },
-        project: { select: { id: true, code: true, nameAr: true } },
-        dailyLog: { select: { id: true, number: true, logDate: true } }
-      },
-      orderBy: [{ issueDate: 'desc' }, { id: 'desc' }]
-    }),
-    prisma.siteIssue.count({ where })
+    prisma.orm.public.SiteIssue.where((r) => qw(r, where)).include('branch', (inc) => inc.select('id', 'code', 'nameAr')).include('project', (inc) => inc.select('id', 'code', 'nameAr')).include('dailyLog', (inc) => inc.select('id', 'number', 'logDate')).orderBy([(r) => r.issueDate.desc(), (r) => r.id.desc()]).offset(pageState.skip).limit(pageState.limit).all(),
+    prisma.orm.public.SiteIssue.where((r) => qw(r, where)).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n)
   ]);
 
   return {
@@ -1061,11 +989,11 @@ export async function listIssues(query: any) {
 }
 
 export async function getIssue(id: number) {
-  return prisma.$transaction((tx) => fetchIssue(tx, id));
+  return prisma.transaction(async (tx) => fetchIssue(tx, id));
 }
 
 export async function createIssue(data: any, userId: number) {
-  return prisma.$transaction(async (tx) => {
+  return prisma.transaction(async (tx) => {{
     const projectId = Number(data.projectId);
     if (!projectId) throw Errors.validation('يجب تحديد المشروع');
     const project = await ensureProject(tx, projectId);
@@ -1073,7 +1001,7 @@ export async function createIssue(data: any, userId: number) {
 
     const dailyLogId = Number(data.dailyLogId ?? 0) || null;
     if (dailyLogId) {
-      const dailyLog = await tx.siteDailyLog.findUnique({ where: { id: dailyLogId }, select: { id: true, projectId: true } });
+      const dailyLog = await tx.orm.public.SiteDailyLog.select('id', 'projectId').first({ id: dailyLogId });
       if (!dailyLog) throw Errors.notFound('اليومية المرتبطة غير موجودة');
       if (Number(dailyLog.projectId) !== projectId) throw Errors.business('اليومية لا تنتمي لنفس المشروع');
     }
@@ -1082,8 +1010,7 @@ export async function createIssue(data: any, userId: number) {
       await ensureEmployee(tx, Number(data.reportedByEmployeeId));
     }
 
-    const row = await tx.siteIssue.create({
-      data: {
+    const row = await tx.orm.public.SiteIssue.create({
         number: data.number ?? (await generateNumber(tx, 'siteIssue', 'SIS')),
         branchId,
         projectId,
@@ -1101,8 +1028,7 @@ export async function createIssue(data: any, userId: number) {
         notes: toText(data.notes),
         createdById: userId,
         updatedById: userId
-      }
-    });
+      });
 
     await enqueueOutboxEvent(tx, {
       eventType: 'site-ops.issue.created',
@@ -1121,12 +1047,12 @@ export async function createIssue(data: any, userId: number) {
     });
 
     return fetchIssue(tx, row.id);
-  });
+  }});
 }
 
 export async function updateIssue(id: number, data: any, userId: number) {
-  return prisma.$transaction(async (tx) => {
-    const current = await tx.siteIssue.findUnique({ where: { id } });
+  return prisma.transaction(async (tx) => {{
+    const current = await tx.orm.public.SiteIssue.first({ id });
     if (!current) throw Errors.notFound('المشكلة الميدانية غير موجودة');
     if (current.status === 'RESOLVED') throw Errors.business('لا يمكن تعديل مشكلة تم حلها');
 
@@ -1136,16 +1062,14 @@ export async function updateIssue(id: number, data: any, userId: number) {
 
     const dailyLogId = data.dailyLogId !== undefined ? Number(data.dailyLogId || 0) || null : current.dailyLogId;
     if (dailyLogId) {
-      const dailyLog = await tx.siteDailyLog.findUnique({ where: { id: dailyLogId }, select: { id: true, projectId: true } });
+      const dailyLog = await tx.orm.public.SiteDailyLog.select('id', 'projectId').first({ id: dailyLogId });
       if (!dailyLog) throw Errors.notFound('اليومية المرتبطة غير موجودة');
       if (Number(dailyLog.projectId) !== projectId) throw Errors.business('اليومية لا تنتمي لنفس المشروع');
     }
 
     if (data.reportedByEmployeeId) await ensureEmployee(tx, Number(data.reportedByEmployeeId));
 
-    await tx.siteIssue.update({
-      where: { id },
-      data: {
+    await tx.orm.public.SiteIssue.where((r) => qw(r, { id })).update({
         branchId,
         projectId,
         dailyLogId,
@@ -1158,8 +1082,7 @@ export async function updateIssue(id: number, data: any, userId: number) {
         reportedByEmployeeId: data.reportedByEmployeeId !== undefined ? Number(data.reportedByEmployeeId || 0) || null : current.reportedByEmployeeId,
         notes: data.notes !== undefined ? toText(data.notes) : current.notes,
         updatedById: userId
-      }
-    });
+      }).then((r0) => r0!);
 
     await enqueueOutboxEvent(tx, {
       eventType: 'site-ops.issue.updated',
@@ -1176,28 +1099,25 @@ export async function updateIssue(id: number, data: any, userId: number) {
     });
 
     return fetchIssue(tx, id);
-  });
+  }});
 }
 
 export async function resolveIssue(id: number, data: any, userId: number) {
-  return prisma.$transaction(async (tx) => {
-    const current = await tx.siteIssue.findUnique({ where: { id } });
+  return prisma.transaction(async (tx) => {{
+    const current = await tx.orm.public.SiteIssue.first({ id });
     if (!current) throw Errors.notFound('المشكلة الميدانية غير موجودة');
     if (current.status === 'RESOLVED') return fetchIssue(tx, id);
 
     if (data.resolvedByEmployeeId) await ensureEmployee(tx, Number(data.resolvedByEmployeeId));
 
-    await tx.siteIssue.update({
-      where: { id },
-      data: {
+    await tx.orm.public.SiteIssue.where((r) => qw(r, { id })).update({
         status: 'RESOLVED',
         approvalStatus: 'APPROVED',
         resolvedAt: data.resolvedAt ? normalizeDateOnly(data.resolvedAt, 'resolvedAt') : new Date(),
         resolvedByEmployeeId: Number(data.resolvedByEmployeeId ?? 0) || current.resolvedByEmployeeId,
         notes: [current.notes, toText(data.notes)].filter(Boolean).join('\n'),
         updatedById: userId
-      }
-    });
+      }).then((r0) => r0!);
 
     await enqueueOutboxEvent(tx, {
       eventType: 'site-ops.issue.resolved',
@@ -1215,7 +1135,7 @@ export async function resolveIssue(id: number, data: any, userId: number) {
     });
 
     return fetchIssue(tx, id);
-  });
+  }});
 }
 
 export async function listAttendance(query: any) {
@@ -1233,18 +1153,8 @@ export async function listAttendance(query: any) {
   }
 
   const [rows, total] = await Promise.all([
-    prisma.siteAttendance.findMany({
-      where,
-      skip: pageState.skip,
-      take: pageState.limit,
-      include: {
-        branch: { select: { id: true, code: true, nameAr: true } },
-        project: { select: { id: true, code: true, nameAr: true } },
-        employee: { select: { id: true, code: true, fullName: true } }
-      },
-      orderBy: [{ date: 'desc' }, { id: 'desc' }]
-    }),
-    prisma.siteAttendance.count({ where })
+    prisma.orm.public.SiteAttendance.where((r) => qw(r, where)).include('branch', (inc) => inc.select('id', 'code', 'nameAr')).include('project', (inc) => inc.select('id', 'code', 'nameAr')).include('employee', (inc) => inc.select('id', 'code', 'fullName')).orderBy([(r) => r.date.desc(), (r) => r.id.desc()]).offset(pageState.skip).limit(pageState.limit).all(),
+    prisma.orm.public.SiteAttendance.where((r) => qw(r, where)).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n)
   ]);
 
   return {
@@ -1259,11 +1169,11 @@ export async function listAttendance(query: any) {
 }
 
 export async function getAttendance(id: number) {
-  return prisma.$transaction((tx) => fetchAttendance(tx, id));
+  return prisma.transaction(async (tx) => fetchAttendance(tx, id));
 }
 
 export async function createAttendance(data: any, userId: number) {
-  return prisma.$transaction(async (tx) => {
+  return prisma.transaction(async (tx) => {{
     const projectId = Number(data.projectId);
     const employeeId = Number(data.employeeId);
     if (!projectId) throw Errors.validation('يجب تحديد المشروع');
@@ -1278,25 +1188,7 @@ export async function createAttendance(data: any, userId: number) {
     const inferredHours = checkIn && checkOut ? Math.max(0, (checkOut.getTime() - checkIn.getTime()) / (1000 * 60 * 60)) : 0;
     const hoursWorked = data.hoursWorked !== undefined ? toNumber(data.hoursWorked, 'ساعات العمل') ?? 0 : roundAmount(inferredHours);
 
-    const row = await tx.siteAttendance.upsert({
-      where: {
-        employeeId_projectId_date: {
-          employeeId,
-          projectId,
-          date
-        }
-      },
-      update: {
-        branchId,
-        checkIn,
-        checkOut,
-        hoursWorked,
-        shift: toText(data.shift),
-        status: String(data.status ?? 'PRESENT').toUpperCase(),
-        notes: toText(data.notes),
-        updatedById: userId
-      },
-      create: {
+    const row = await tx.orm.public.SiteAttendance.upsert({ create: {
         branchId,
         projectId,
         employeeId,
@@ -1312,8 +1204,22 @@ export async function createAttendance(data: any, userId: number) {
         notes: toText(data.notes),
         createdById: userId,
         updatedById: userId
-      }
-    });
+      }, update: {
+        branchId,
+        checkIn,
+        checkOut,
+        hoursWorked,
+        shift: toText(data.shift),
+        status: String(data.status ?? 'PRESENT').toUpperCase(),
+        notes: toText(data.notes),
+        updatedById: userId
+      }, conflictOn: {
+        employeeId_projectId_date: {
+          employeeId,
+          projectId,
+          date
+        }
+      } });
 
     await syncAttendanceFromSite(tx, employeeId, date, branchId);
 
@@ -1334,12 +1240,12 @@ export async function createAttendance(data: any, userId: number) {
     });
 
     return fetchAttendance(tx, row.id);
-  });
+  }});
 }
 
 export async function updateAttendance(id: number, data: any, userId: number) {
-  return prisma.$transaction(async (tx) => {
-    const current = await tx.siteAttendance.findUnique({ where: { id } });
+  return prisma.transaction(async (tx) => {{
+    const current = await tx.orm.public.SiteAttendance.first({ id });
     if (!current) throw Errors.notFound('سجل الحضور الميداني غير موجود');
 
     const projectId = Number(data.projectId ?? current.projectId);
@@ -1353,9 +1259,7 @@ export async function updateAttendance(id: number, data: any, userId: number) {
     const inferredHours = checkIn && checkOut ? Math.max(0, (checkOut.getTime() - checkIn.getTime()) / (1000 * 60 * 60)) : Number(current.hoursWorked ?? 0);
     const hoursWorked = data.hoursWorked !== undefined ? toNumber(data.hoursWorked, 'ساعات العمل') ?? 0 : roundAmount(inferredHours);
 
-    await tx.siteAttendance.update({
-      where: { id },
-      data: {
+    await tx.orm.public.SiteAttendance.where((r) => qw(r, { id })).update({
         branchId,
         projectId,
         employeeId,
@@ -1367,8 +1271,7 @@ export async function updateAttendance(id: number, data: any, userId: number) {
         status: data.status !== undefined ? String(data.status).toUpperCase() : current.status,
         notes: data.notes !== undefined ? toText(data.notes) : current.notes,
         updatedById: userId
-      }
-    });
+      }).then((r0) => r0!);
 
     await syncAttendanceFromSite(tx, employeeId, date, branchId);
     if (employeeId !== current.employeeId) {
@@ -1392,23 +1295,20 @@ export async function updateAttendance(id: number, data: any, userId: number) {
     });
 
     return fetchAttendance(tx, id);
-  });
+  }});
 }
 
 export async function submitAttendance(id: number, userId: number) {
-  return prisma.$transaction(async (tx) => {
-    const current = await tx.siteAttendance.findUnique({ where: { id } });
+  return prisma.transaction(async (tx) => {{
+    const current = await tx.orm.public.SiteAttendance.first({ id });
     if (!current) throw Errors.notFound('سجل الحضور الميداني غير موجود');
     if (current.approvalStatus === 'PENDING') return fetchAttendance(tx, id);
 
-    await tx.siteAttendance.update({
-      where: { id },
-      data: {
+    await tx.orm.public.SiteAttendance.where((r) => qw(r, { id })).update({
         approvalStatus: 'PENDING',
         status: current.status === 'DRAFT' ? 'PRESENT' : current.status,
         updatedById: userId
-      }
-    });
+      }).then((r0) => r0!);
 
     await enqueueOutboxEvent(tx, {
       eventType: 'site-ops.attendance.submitted',
@@ -1426,22 +1326,19 @@ export async function submitAttendance(id: number, userId: number) {
     });
 
     return fetchAttendance(tx, id);
-  });
+  }});
 }
 
 export async function approveAttendance(id: number, userId: number) {
-  return prisma.$transaction(async (tx) => {
-    const current = await tx.siteAttendance.findUnique({ where: { id } });
+  return prisma.transaction(async (tx) => {{
+    const current = await tx.orm.public.SiteAttendance.first({ id });
     if (!current) throw Errors.notFound('سجل الحضور الميداني غير موجود');
     if (current.approvalStatus === 'APPROVED') return fetchAttendance(tx, id);
 
-    await tx.siteAttendance.update({
-      where: { id },
-      data: {
+    await tx.orm.public.SiteAttendance.where((r) => qw(r, { id })).update({
         approvalStatus: 'APPROVED',
         updatedById: userId
-      }
-    });
+      }).then((r0) => r0!);
 
     await syncAttendanceFromSite(tx, current.employeeId, normalizeDateOnly(current.date, 'date'), current.branchId);
 
@@ -1462,5 +1359,5 @@ export async function approveAttendance(id: number, userId: number) {
     });
 
     return fetchAttendance(tx, id);
-  });
+  }});
 }

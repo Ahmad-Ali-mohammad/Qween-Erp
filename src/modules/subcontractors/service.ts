@@ -1,3 +1,4 @@
+import { qw } from '../../utils/where';
 import { prisma } from '../../config/database';
 import { enqueueOutboxEvent } from '../../platform/events/outbox';
 import { parseDateOrThrow } from '../../utils/date';
@@ -281,34 +282,8 @@ export async function listSubcontracts(query: any) {
   }
 
   const [rows, total] = await Promise.all([
-    prisma.subcontract.findMany({
-      where,
-      skip,
-      take: limit,
-      include: {
-        branch: { select: { id: true, code: true, nameAr: true } },
-        supplier: { select: { id: true, code: true, nameAr: true } },
-        project: { select: { id: true, code: true, nameAr: true } },
-        ipcs: {
-          orderBy: [{ certificateDate: 'desc' }, { id: 'desc' }],
-          take: 3,
-          include: {
-            payableInvoice: {
-              select: {
-                id: true,
-                number: true,
-                total: true,
-                paidAmount: true,
-                outstanding: true,
-                status: true
-              }
-            }
-          }
-        }
-      },
-      orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }]
-    }),
-    prisma.subcontract.count({ where })
+    prisma.orm.public.Subcontract.where((r) => qw(r, where)).include('branch', (inc) => inc.select('id', 'code', 'nameAr')).include('supplier', (inc) => inc.select('id', 'code', 'nameAr')).include('project', (inc) => inc.select('id', 'code', 'nameAr')).include('ipcs', (inc) => inc.orderBy([(r) => r.certificateDate.desc(), (r) => r.id.desc()]).limit(3).include('payableInvoice', (inc2) => inc.select('id', 'number', 'total', 'paidAmount', 'outstanding', 'status'))).orderBy([(r) => r.updatedAt.desc(), (r) => r.id.desc()]).offset(skip).limit(limit).all(),
+    prisma.orm.public.Subcontract.where((r) => qw(r, where)).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n)
   ]);
 
   return {
@@ -323,17 +298,16 @@ export async function listSubcontracts(query: any) {
 }
 
 export async function getSubcontract(id: number) {
-  return prisma.$transaction((tx) => fetchSubcontract(tx, id));
+  return prisma.transaction(async (tx) => fetchSubcontract(tx, id));
 }
 
 export async function createSubcontract(data: any, userId: number) {
-  return prisma.$transaction(async (tx) => {
+  return prisma.transaction(async (tx) => {{
     const { supplierId, projectId, branchId } = await resolveSubcontractContext(tx, data);
     const contractValue = normalizeAmount(data.contractValue, 'قيمة العقد') ?? 0;
     const retentionRate = normalizeRate(data.retentionRate, 'نسبة الاحتجاز');
 
-    const subcontract = await tx.subcontract.create({
-      data: {
+    const subcontract = await tx.orm.public.Subcontract.create({
         number: data.number ?? (await generateSubcontractNumber(tx)),
         branchId,
         supplierId,
@@ -349,8 +323,7 @@ export async function createSubcontract(data: any, userId: number) {
         notes: normalizeText(data.notes),
         createdById: userId,
         updatedById: userId
-      }
-    });
+      });
 
     await enqueueOutboxEvent(tx, {
       eventType: 'subcontractors.subcontract.created',
@@ -369,12 +342,12 @@ export async function createSubcontract(data: any, userId: number) {
     });
 
     return fetchSubcontract(tx, subcontract.id);
-  });
+  }});
 }
 
 export async function updateSubcontract(id: number, data: any, userId: number) {
-  return prisma.$transaction(async (tx) => {
-    const current = await tx.subcontract.findUnique({ where: { id } });
+  return prisma.transaction(async (tx) => {{
+    const current = await tx.orm.public.Subcontract.first({ id });
     if (!current) throw Errors.notFound('عقد المقاول من الباطن غير موجود');
     if (current.status === 'CLOSED') throw Errors.business('لا يمكن تعديل عقد مغلق');
 
@@ -382,9 +355,7 @@ export async function updateSubcontract(id: number, data: any, userId: number) {
     const contractValue = normalizeAmount(data.contractValue ?? current.contractValue, 'قيمة العقد') ?? 0;
     const retentionRate = normalizeRate(data.retentionRate ?? current.retentionRate, 'نسبة الاحتجاز');
 
-    await tx.subcontract.update({
-      where: { id },
-      data: {
+    await tx.orm.public.Subcontract.where((r) => qw(r, { id })).update({
         branchId,
         supplierId,
         projectId,
@@ -398,8 +369,7 @@ export async function updateSubcontract(id: number, data: any, userId: number) {
         performanceRating: data.performanceRating !== undefined ? (data.performanceRating ? Number(data.performanceRating) : null) : current.performanceRating,
         notes: normalizeText(data.notes ?? current.notes),
         updatedById: userId
-      }
-    });
+      }).then((r0) => r0!);
 
     await enqueueOutboxEvent(tx, {
       eventType: 'subcontractors.subcontract.updated',
@@ -417,24 +387,21 @@ export async function updateSubcontract(id: number, data: any, userId: number) {
     });
 
     return fetchSubcontract(tx, id);
-  });
+  }});
 }
 
 export async function activateSubcontract(id: number, userId: number) {
-  return prisma.$transaction(async (tx) => {
-    const current = await tx.subcontract.findUnique({ where: { id } });
+  return prisma.transaction(async (tx) => {{
+    const current = await tx.orm.public.Subcontract.first({ id });
     if (!current) throw Errors.notFound('عقد المقاول من الباطن غير موجود');
     if (current.status !== 'DRAFT') throw Errors.business('يمكن تفعيل العقود المسودة فقط');
 
-    await tx.subcontract.update({
-      where: { id },
-      data: {
+    await tx.orm.public.Subcontract.where((r) => qw(r, { id })).update({
         status: 'ACTIVE',
         approvalStatus: 'APPROVED',
         activatedAt: new Date(),
         updatedById: userId
-      }
-    });
+      }).then((r0) => r0!);
 
     await enqueueOutboxEvent(tx, {
       eventType: 'subcontractors.subcontract.activated',
@@ -452,7 +419,7 @@ export async function activateSubcontract(id: number, userId: number) {
     });
 
     return fetchSubcontract(tx, id);
-  });
+  }});
 }
 
 export async function listIpcs(query: any) {
@@ -482,39 +449,8 @@ export async function listIpcs(query: any) {
   }
 
   const [rows, total] = await Promise.all([
-    prisma.subcontractIpc.findMany({
-      where,
-      skip,
-      take: limit,
-      include: {
-        subcontract: {
-          include: {
-            branch: { select: { id: true, code: true, nameAr: true } },
-            supplier: { select: { id: true, code: true, nameAr: true } },
-            project: { select: { id: true, code: true, nameAr: true } }
-          }
-        },
-        payableInvoice: {
-          include: {
-            payments: {
-              include: {
-                payment: {
-                  select: {
-                    id: true,
-                    number: true,
-                    amount: true,
-                    status: true,
-                    date: true
-                  }
-                }
-              }
-            }
-          }
-        }
-      },
-      orderBy: [{ certificateDate: 'desc' }, { id: 'desc' }]
-    }),
-    prisma.subcontractIpc.count({ where })
+    prisma.orm.public.SubcontractIpc.where((r) => qw(r, where)).include('subcontract', (inc) => inc.include('branch', (inc2) => inc.select('id', 'code', 'nameAr')).include('supplier', (inc2) => inc.select('id', 'code', 'nameAr')).include('project', (inc2) => inc.select('id', 'code', 'nameAr'))).include('payableInvoice', (inc) => inc.include('payments', (inc2) => inc.include('payment', (inc2) => inc.select('id', 'number', 'amount', 'status', 'date')))).orderBy([(r) => r.certificateDate.desc(), (r) => r.id.desc()]).offset(skip).limit(limit).all(),
+    prisma.orm.public.SubcontractIpc.where((r) => qw(r, where)).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n)
   ]);
 
   return {
@@ -529,17 +465,12 @@ export async function listIpcs(query: any) {
 }
 
 export async function getIpc(id: number) {
-  return prisma.$transaction((tx) => fetchIpc(tx, id));
+  return prisma.transaction(async (tx) => fetchIpc(tx, id));
 }
 
 export async function createIpc(data: any, userId: number) {
-  return prisma.$transaction(async (tx) => {
-    const subcontract = await tx.subcontract.findUnique({
-      where: { id: Number(data.subcontractId) },
-      include: {
-        supplier: { select: { id: true, paymentTerms: true } }
-      }
-    });
+  return prisma.transaction(async (tx) => {{
+    const subcontract = await tx.orm.public.Subcontract.include('supplier', (inc) => inc.select('id', 'paymentTerms')).first((r) => qw(r, { id: Number(data.subcontractId) }));
     if (!subcontract) throw Errors.notFound('عقد المقاول من الباطن غير موجود');
     if (subcontract.status !== 'ACTIVE') throw Errors.business('يجب تفعيل العقد قبل إنشاء المستخلص');
 
@@ -554,8 +485,7 @@ export async function createIpc(data: any, userId: number) {
     const retentionAmount = Math.round((certifiedAmount * retentionRate) * 100) / 10000;
     const netAmount = Math.round((certifiedAmount - retentionAmount) * 100) / 100;
 
-    const ipc = await tx.subcontractIpc.create({
-      data: {
+    const ipc = await tx.orm.public.SubcontractIpc.create({
         subcontractId: subcontract.id,
         number: data.number ?? (await generateIpcNumber(tx)),
         certificateDate: parseDateOrThrow(data.certificateDate, 'certificateDate'),
@@ -570,8 +500,7 @@ export async function createIpc(data: any, userId: number) {
         notes: normalizeText(data.notes),
         createdById: userId,
         updatedById: userId
-      }
-    });
+      });
 
     await enqueueOutboxEvent(tx, {
       eventType: 'subcontractors.ipc.created',
@@ -590,17 +519,12 @@ export async function createIpc(data: any, userId: number) {
     });
 
     return fetchIpc(tx, ipc.id);
-  });
+  }});
 }
 
 export async function updateIpc(id: number, data: any, userId: number) {
-  return prisma.$transaction(async (tx) => {
-    const current = await tx.subcontractIpc.findUnique({
-      where: { id },
-      include: {
-        subcontract: true
-      }
-    });
+  return prisma.transaction(async (tx) => {{
+    const current = await tx.orm.public.SubcontractIpc.include('subcontract').first({ id });
     if (!current) throw Errors.notFound('المستخلص غير موجود');
     if (current.approvalStatus === 'APPROVED' || current.payableInvoiceId) {
       throw Errors.business('لا يمكن تعديل مستخلص تم اعتماده أو تحويله إلى ذمة');
@@ -617,9 +541,7 @@ export async function updateIpc(id: number, data: any, userId: number) {
     const retentionAmount = Math.round((certifiedAmount * retentionRate) * 100) / 10000;
     const netAmount = Math.round((certifiedAmount - retentionAmount) * 100) / 100;
 
-    await tx.subcontractIpc.update({
-      where: { id },
-      data: {
+    await tx.orm.public.SubcontractIpc.where((r) => qw(r, { id })).update({
         number: data.number ?? current.number,
         certificateDate: data.certificateDate ? parseDateOrThrow(data.certificateDate, 'certificateDate') : current.certificateDate,
         periodStart: data.periodStart !== undefined ? (data.periodStart ? parseDateOrThrow(data.periodStart, 'periodStart') : null) : current.periodStart,
@@ -632,8 +554,7 @@ export async function updateIpc(id: number, data: any, userId: number) {
         netAmount,
         notes: normalizeText(data.notes ?? current.notes),
         updatedById: userId
-      }
-    });
+      }).then((r0) => r0!);
 
     await enqueueOutboxEvent(tx, {
       eventType: 'subcontractors.ipc.updated',
@@ -651,28 +572,22 @@ export async function updateIpc(id: number, data: any, userId: number) {
     });
 
     return fetchIpc(tx, id);
-  });
+  }});
 }
 
 export async function submitIpc(id: number, userId: number) {
-  return prisma.$transaction(async (tx) => {
-    const current = await tx.subcontractIpc.findUnique({
-      where: { id },
-      include: { subcontract: true }
-    });
+  return prisma.transaction(async (tx) => {{
+    const current = await tx.orm.public.SubcontractIpc.include('subcontract').first({ id });
     if (!current) throw Errors.notFound('المستخلص غير موجود');
     if (current.status !== 'DRAFT') throw Errors.business('يمكن إرسال المستخلصات المسودة فقط');
     if (Number(current.certifiedAmount ?? 0) <= 0) throw Errors.business('القيمة المعتمدة يجب أن تكون أكبر من صفر');
 
-    await tx.subcontractIpc.update({
-      where: { id },
-      data: {
+    await tx.orm.public.SubcontractIpc.where((r) => qw(r, { id })).update({
         status: 'SUBMITTED',
         approvalStatus: 'PENDING',
         submittedAt: new Date(),
         updatedById: userId
-      }
-    });
+      }).then((r0) => r0!);
 
     await enqueueOutboxEvent(tx, {
       eventType: 'subcontractors.ipc.submitted',
@@ -690,22 +605,12 @@ export async function submitIpc(id: number, userId: number) {
     });
 
     return fetchIpc(tx, id);
-  });
+  }});
 }
 
 export async function approveIpc(id: number, userId: number) {
-  return prisma.$transaction(async (tx) => {
-    const current = await tx.subcontractIpc.findUnique({
-      where: { id },
-      include: {
-        subcontract: {
-          include: {
-            supplier: { select: { id: true, paymentTerms: true } },
-            project: { select: { id: true, nameAr: true } }
-          }
-        }
-      }
-    });
+  return prisma.transaction(async (tx) => {{
+    const current = await tx.orm.public.SubcontractIpc.include('subcontract', (inc) => inc.include('supplier', (inc2) => inc.select('id', 'paymentTerms')).include('project', (inc2) => inc.select('id', 'nameAr'))).first({ id });
 
     if (!current) throw Errors.notFound('المستخلص غير موجود');
     if (current.approvalStatus === 'APPROVED' || current.payableInvoiceId) {
@@ -740,17 +645,14 @@ export async function approveIpc(id: number, userId: number) {
       { issue: true }
     );
 
-    await tx.subcontractIpc.update({
-      where: { id },
-      data: {
+    await tx.orm.public.SubcontractIpc.where((r) => qw(r, { id })).update({
         status: 'CERTIFIED',
         approvalStatus: 'APPROVED',
         postingStatus: 'POSTED',
         payableInvoiceId: invoice.id,
         approvedAt: new Date(),
         updatedById: userId
-      }
-    });
+      }).then((r0) => r0!);
 
     await refreshIpcStatusFromInvoice(tx, id);
     await recomputeSubcontractTotals(tx, current.subcontractId);
@@ -773,30 +675,11 @@ export async function approveIpc(id: number, userId: number) {
     });
 
     return fetchIpc(tx, id);
-  });
+  }});
 }
 
 export async function createIpcPayment(id: number, data: any, userId: number) {
-  const ipc = await prisma.subcontractIpc.findUnique({
-    where: { id },
-    include: {
-      subcontract: {
-        include: {
-          supplier: { select: { id: true, nameAr: true } }
-        }
-      },
-      payableInvoice: {
-        select: {
-          id: true,
-          number: true,
-          total: true,
-          paidAmount: true,
-          outstanding: true,
-          status: true
-        }
-      }
-    }
-  });
+  const ipc = await prisma.orm.public.SubcontractIpc.include('subcontract', (inc) => inc.include('supplier', (inc2) => inc.select('id', 'nameAr'))).include('payableInvoice', (inc) => inc.select('id', 'number', 'total', 'paidAmount', 'outstanding', 'status')).first({ id });
 
   if (!ipc) throw Errors.notFound('المستخلص غير موجود');
   if (!ipc.payableInvoiceId || !ipc.payableInvoice) {
@@ -834,7 +717,7 @@ export async function createIpcPayment(id: number, data: any, userId: number) {
     paymentRecord = await paymentsService.completePayment(Number(payment.id), userId);
   }
 
-  return prisma.$transaction(async (tx) => {
+  return prisma.transaction(async (tx) => {{
     await refreshIpcStatusFromInvoice(tx, id);
     await recomputeSubcontractTotals(tx, ipc.subcontractId);
 
@@ -863,5 +746,5 @@ export async function createIpcPayment(id: number, data: any, userId: number) {
       ipc: refreshed,
       payment: paymentRecord
     };
-  });
+  }});
 }

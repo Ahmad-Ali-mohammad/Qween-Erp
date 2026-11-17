@@ -1,3 +1,4 @@
+import { qw } from '../../utils/where';
 import { prisma } from '../../config/database';
 import { enqueueOutboxEvent } from '../../platform/events/outbox';
 import { buildSequentialNumberFromLatest } from '../../utils/id-generator';
@@ -210,7 +211,7 @@ export async function listTemplates(query: any) {
       },
       orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }]
     }),
-    prisma.printTemplate.count({ where })
+    prisma.orm.public.PrintTemplate.where((r) => qw(r, where)).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n)
   ]);
 
   return {
@@ -225,13 +226,12 @@ export async function listTemplates(query: any) {
 }
 
 export async function getTemplate(id: number) {
-  return prisma.$transaction((tx) => fetchTemplate(tx, id));
+  return prisma.transaction(async (tx) => fetchTemplate(tx, id));
 }
 
 export async function createTemplate(data: any, userId: number) {
-  return prisma.$transaction(async (tx) => {
-    const row = await tx.printTemplate.create({
-      data: {
+  return prisma.transaction(async (tx) => {{
+    const row = await tx.orm.public.PrintTemplate.create({
         key: data.key ? String(data.key).trim() : await generateTemplateKey(tx),
         title: String(data.title ?? '').trim(),
         entityType: String(data.entityType ?? '').trim(),
@@ -245,8 +245,7 @@ export async function createTemplate(data: any, userId: number) {
         branchId: Number(data.branchId ?? 0) || null,
         createdById: userId,
         updatedById: userId
-      }
-    });
+      });
 
     await appendAudit(tx, {
       branchId: row.branchId,
@@ -279,17 +278,15 @@ export async function createTemplate(data: any, userId: number) {
     });
 
     return fetchTemplate(tx, row.id);
-  });
+  }});
 }
 
 export async function updateTemplate(id: number, data: any, userId: number) {
-  return prisma.$transaction(async (tx) => {
-    const current = await tx.printTemplate.findUnique({ where: { id } });
+  return prisma.transaction(async (tx) => {{
+    const current = await tx.orm.public.PrintTemplate.first({ id });
     if (!current) throw Errors.notFound('قالب الطباعة غير موجود');
 
-    await tx.printTemplate.update({
-      where: { id },
-      data: {
+    await tx.orm.public.PrintTemplate.where((r) => qw(r, { id })).update({
         key: data.key !== undefined ? String(data.key).trim() : current.key,
         title: data.title !== undefined ? String(data.title).trim() : current.title,
         entityType: data.entityType !== undefined ? String(data.entityType).trim() : current.entityType,
@@ -302,8 +299,7 @@ export async function updateTemplate(id: number, data: any, userId: number) {
         attachmentsCount: data.attachmentsCount !== undefined ? Number(data.attachmentsCount) || 0 : current.attachmentsCount,
         branchId: data.branchId !== undefined ? Number(data.branchId || 0) || null : current.branchId,
         updatedById: userId
-      }
-    });
+      }).then((r0) => r0!);
 
     await appendAudit(tx, {
       branchId: current.branchId,
@@ -330,23 +326,20 @@ export async function updateTemplate(id: number, data: any, userId: number) {
     });
 
     return fetchTemplate(tx, id);
-  });
+  }});
 }
 
 export async function toggleTemplateActive(id: number, active: boolean, userId: number) {
-  return prisma.$transaction(async (tx) => {
-    const current = await tx.printTemplate.findUnique({ where: { id } });
+  return prisma.transaction(async (tx) => {{
+    const current = await tx.orm.public.PrintTemplate.first({ id });
     if (!current) throw Errors.notFound('قالب الطباعة غير موجود');
 
     const status = active ? 'ACTIVE' : 'INACTIVE';
-    await tx.printTemplate.update({
-      where: { id },
-      data: {
+    await tx.orm.public.PrintTemplate.where((r) => qw(r, { id })).update({
         status,
         approvalStatus: active ? 'APPROVED' : current.approvalStatus,
         updatedById: userId
-      }
-    });
+      }).then((r0) => r0!);
 
     await appendAudit(tx, {
       branchId: current.branchId,
@@ -372,7 +365,7 @@ export async function toggleTemplateActive(id: number, active: boolean, userId: 
     });
 
     return fetchTemplate(tx, id);
-  });
+  }});
 }
 
 export async function listPrintJobs(query: any) {
@@ -391,17 +384,8 @@ export async function listPrintJobs(query: any) {
   }
 
   const [rows, total] = await Promise.all([
-    prisma.printJob.findMany({
-      where,
-      skip: pageState.skip,
-      take: pageState.limit,
-      include: {
-        branch: { select: { id: true, code: true, nameAr: true } },
-        template: { select: { id: true, key: true, title: true, defaultFormat: true } }
-      },
-      orderBy: [{ requestedAt: 'desc' }, { id: 'desc' }]
-    }),
-    prisma.printJob.count({ where })
+    prisma.orm.public.PrintJob.where((r) => qw(r, where)).include('branch', (inc) => inc.select('id', 'code', 'nameAr')).include('template', (inc) => inc.select('id', 'key', 'title', 'defaultFormat')).orderBy([(r) => r.requestedAt.desc(), (r) => r.id.desc()]).offset(pageState.skip).limit(pageState.limit).all(),
+    prisma.orm.public.PrintJob.where((r) => qw(r, where)).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n)
   ]);
 
   return {
@@ -416,15 +400,15 @@ export async function listPrintJobs(query: any) {
 }
 
 export async function getPrintJob(id: number) {
-  return prisma.$transaction((tx) => fetchPrintJob(tx, id));
+  return prisma.transaction(async (tx) => fetchPrintJob(tx, id));
 }
 
 export async function createPrintJob(data: any, userId: number) {
-  return prisma.$transaction(async (tx) => {
+  return prisma.transaction(async (tx) => {{
     const templateId = Number(data.templateId ?? 0) || null;
     let template: any = null;
     if (templateId) {
-      template = await tx.printTemplate.findUnique({ where: { id: templateId } });
+      template = await tx.orm.public.PrintTemplate.first({ id: templateId });
       if (!template) throw Errors.notFound('قالب الطباعة غير موجود');
       if (template.status !== 'ACTIVE') throw Errors.business('القالب غير نشط حاليًا');
     }
@@ -438,8 +422,7 @@ export async function createPrintJob(data: any, userId: number) {
     const entityType = String(data.entityType ?? template?.entityType ?? '').trim();
     if (!entityType) throw Errors.validation('يجب تحديد نوع الكيان');
 
-    const row = await tx.printJob.create({
-      data: {
+    const row = await tx.orm.public.PrintJob.create({
         number: data.number ? String(data.number).trim() : await generateNumber(tx, 'printJob', 'PRN'),
         branchId,
         templateId,
@@ -456,8 +439,7 @@ export async function createPrintJob(data: any, userId: number) {
         attachmentsCount: Number(data.attachmentsCount ?? 0) || 0,
         createdById: userId,
         updatedById: userId
-      }
-    });
+      });
 
     await appendAudit(tx, {
       branchId,
@@ -495,19 +477,19 @@ export async function createPrintJob(data: any, userId: number) {
     });
 
     return fetchPrintJob(tx, row.id);
-  });
+  }});
 }
 
 export async function updatePrintJob(id: number, data: any, userId: number) {
-  return prisma.$transaction(async (tx) => {
-    const current = await tx.printJob.findUnique({ where: { id } });
+  return prisma.transaction(async (tx) => {{
+    const current = await tx.orm.public.PrintJob.first({ id });
     if (!current) throw Errors.notFound('مهمة الطباعة غير موجودة');
     if (current.status === 'COMPLETED') throw Errors.business('لا يمكن تعديل مهمة مكتملة');
 
     const templateId = data.templateId !== undefined ? Number(data.templateId || 0) || null : current.templateId;
     let template: any = null;
     if (templateId) {
-      template = await tx.printTemplate.findUnique({ where: { id: templateId } });
+      template = await tx.orm.public.PrintTemplate.first({ id: templateId });
       if (!template) throw Errors.notFound('قالب الطباعة غير موجود');
     }
 
@@ -519,9 +501,7 @@ export async function updatePrintJob(id: number, data: any, userId: number) {
       throw Errors.business('الفرع المختار لا يطابق فرع القالب');
     }
 
-    await tx.printJob.update({
-      where: { id },
-      data: {
+    await tx.orm.public.PrintJob.where((r) => qw(r, { id })).update({
         branchId,
         templateId,
         entityType,
@@ -531,8 +511,7 @@ export async function updatePrintJob(id: number, data: any, userId: number) {
         fileName: data.fileName !== undefined ? toText(data.fileName) : current.fileName,
         fileUrl: data.fileUrl !== undefined ? toText(data.fileUrl) : current.fileUrl,
         updatedById: userId
-      }
-    });
+      }).then((r0) => r0!);
 
     await appendAudit(tx, {
       branchId,
@@ -562,19 +541,17 @@ export async function updatePrintJob(id: number, data: any, userId: number) {
     });
 
     return fetchPrintJob(tx, id);
-  });
+  }});
 }
 
 export async function markPrintJobStatus(id: number, data: any, userId: number) {
-  return prisma.$transaction(async (tx) => {
-    const current = await tx.printJob.findUnique({ where: { id } });
+  return prisma.transaction(async (tx) => {{
+    const current = await tx.orm.public.PrintJob.first({ id });
     if (!current) throw Errors.notFound('مهمة الطباعة غير موجودة');
     const status = normalizeStatus(data.status);
 
     const now = new Date();
-    await tx.printJob.update({
-      where: { id },
-      data: {
+    await tx.orm.public.PrintJob.where((r) => qw(r, { id })).update({
         status,
         startedAt: status === 'RUNNING' ? current.startedAt ?? now : current.startedAt,
         completedAt: status === 'COMPLETED' ? now : status === 'QUEUED' ? null : current.completedAt,
@@ -584,8 +561,7 @@ export async function markPrintJobStatus(id: number, data: any, userId: number) 
         errorMessage: data.errorMessage !== undefined ? toText(data.errorMessage) : status === 'FAILED' ? current.errorMessage : null,
         approvalStatus: status === 'COMPLETED' ? 'APPROVED' : current.approvalStatus,
         updatedById: userId
-      }
-    });
+      }).then((r0) => r0!);
 
     const next = await fetchPrintJob(tx, id);
 
@@ -624,7 +600,7 @@ export async function markPrintJobStatus(id: number, data: any, userId: number) 
     });
 
     return next;
-  });
+  }});
 }
 
 export async function listExportJobs(query: any) {
@@ -642,16 +618,8 @@ export async function listExportJobs(query: any) {
   }
 
   const [rows, total] = await Promise.all([
-    prisma.exportJob.findMany({
-      where,
-      skip: pageState.skip,
-      take: pageState.limit,
-      include: {
-        branch: { select: { id: true, code: true, nameAr: true } }
-      },
-      orderBy: [{ requestedAt: 'desc' }, { id: 'desc' }]
-    }),
-    prisma.exportJob.count({ where })
+    prisma.orm.public.ExportJob.where((r) => qw(r, where)).include('branch', (inc) => inc.select('id', 'code', 'nameAr')).orderBy([(r) => r.requestedAt.desc(), (r) => r.id.desc()]).offset(pageState.skip).limit(pageState.limit).all(),
+    prisma.orm.public.ExportJob.where((r) => qw(r, where)).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n)
   ]);
 
   return {
@@ -666,13 +634,12 @@ export async function listExportJobs(query: any) {
 }
 
 export async function getExportJob(id: number) {
-  return prisma.$transaction((tx) => fetchExportJob(tx, id));
+  return prisma.transaction(async (tx) => fetchExportJob(tx, id));
 }
 
 export async function createExportJob(data: any, userId: number) {
-  return prisma.$transaction(async (tx) => {
-    const row = await tx.exportJob.create({
-      data: {
+  return prisma.transaction(async (tx) => {{
+    const row = await tx.orm.public.ExportJob.create({
         number: data.number ? String(data.number).trim() : await generateNumber(tx, 'exportJob', 'EXP'),
         branchId: Number(data.branchId ?? 0) || null,
         sourceType: String(data.sourceType ?? '').trim(),
@@ -687,8 +654,7 @@ export async function createExportJob(data: any, userId: number) {
         attachmentsCount: Number(data.attachmentsCount ?? 0) || 0,
         createdById: userId,
         updatedById: userId
-      }
-    });
+      });
 
     await appendAudit(tx, {
       branchId: row.branchId,
@@ -722,12 +688,12 @@ export async function createExportJob(data: any, userId: number) {
     });
 
     return fetchExportJob(tx, row.id);
-  });
+  }});
 }
 
 export async function updateExportJob(id: number, data: any, userId: number) {
-  return prisma.$transaction(async (tx) => {
-    const current = await tx.exportJob.findUnique({ where: { id } });
+  return prisma.transaction(async (tx) => {{
+    const current = await tx.orm.public.ExportJob.first({ id });
     if (!current) throw Errors.notFound('مهمة التصدير غير موجودة');
     if (current.status === 'COMPLETED') throw Errors.business('لا يمكن تعديل مهمة مكتملة');
 
@@ -735,9 +701,7 @@ export async function updateExportJob(id: number, data: any, userId: number) {
     const sourceType = data.sourceType !== undefined ? String(data.sourceType).trim() : current.sourceType;
     const outputFormat = data.outputFormat !== undefined ? normalizeFormat(data.outputFormat, current.outputFormat) : current.outputFormat;
 
-    await tx.exportJob.update({
-      where: { id },
-      data: {
+    await tx.orm.public.ExportJob.where((r) => qw(r, { id })).update({
         branchId,
         sourceType,
         sourceFilter: data.sourceFilter !== undefined ? normalizeObject(data.sourceFilter) : ((current.sourceFilter ?? {}) as Prisma.InputJsonValue),
@@ -746,8 +710,7 @@ export async function updateExportJob(id: number, data: any, userId: number) {
         fileUrl: data.fileUrl !== undefined ? toText(data.fileUrl) : current.fileUrl,
         attachmentsCount: data.attachmentsCount !== undefined ? Number(data.attachmentsCount) || 0 : current.attachmentsCount,
         updatedById: userId
-      }
-    });
+      }).then((r0) => r0!);
 
     await appendAudit(tx, {
       branchId,
@@ -776,20 +739,18 @@ export async function updateExportJob(id: number, data: any, userId: number) {
     });
 
     return fetchExportJob(tx, id);
-  });
+  }});
 }
 
 export async function markExportJobStatus(id: number, data: any, userId: number) {
-  return prisma.$transaction(async (tx) => {
-    const current = await tx.exportJob.findUnique({ where: { id } });
+  return prisma.transaction(async (tx) => {{
+    const current = await tx.orm.public.ExportJob.first({ id });
     if (!current) throw Errors.notFound('مهمة التصدير غير موجودة');
     const status = normalizeStatus(data.status);
     const now = new Date();
     const rowsExported = normalizeNumber(data.rowsExported, 'عدد الصفوف', true);
 
-    await tx.exportJob.update({
-      where: { id },
-      data: {
+    await tx.orm.public.ExportJob.where((r) => qw(r, { id })).update({
         status,
         completedAt: status === 'COMPLETED' ? now : status === 'QUEUED' ? null : current.completedAt,
         failedAt: status === 'FAILED' ? now : status === 'QUEUED' ? null : current.failedAt,
@@ -799,8 +760,7 @@ export async function markExportJobStatus(id: number, data: any, userId: number)
         errorMessage: data.errorMessage !== undefined ? toText(data.errorMessage) : status === 'FAILED' ? current.errorMessage : null,
         approvalStatus: status === 'COMPLETED' ? 'APPROVED' : current.approvalStatus,
         updatedById: userId
-      }
-    });
+      }).then((r0) => r0!);
 
     const next = await fetchExportJob(tx, id);
 
@@ -839,7 +799,7 @@ export async function markExportJobStatus(id: number, data: any, userId: number)
     });
 
     return next;
-  });
+  }});
 }
 
 export async function listConversionJobs(query: any) {
@@ -857,16 +817,8 @@ export async function listConversionJobs(query: any) {
   }
 
   const [rows, total] = await Promise.all([
-    prisma.conversionJob.findMany({
-      where,
-      skip: pageState.skip,
-      take: pageState.limit,
-      include: {
-        branch: { select: { id: true, code: true, nameAr: true } }
-      },
-      orderBy: [{ requestedAt: 'desc' }, { id: 'desc' }]
-    }),
-    prisma.conversionJob.count({ where })
+    prisma.orm.public.ConversionJob.where((r) => qw(r, where)).include('branch', (inc) => inc.select('id', 'code', 'nameAr')).orderBy([(r) => r.requestedAt.desc(), (r) => r.id.desc()]).offset(pageState.skip).limit(pageState.limit).all(),
+    prisma.orm.public.ConversionJob.where((r) => qw(r, where)).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n)
   ]);
 
   return {
@@ -881,13 +833,12 @@ export async function listConversionJobs(query: any) {
 }
 
 export async function getConversionJob(id: number) {
-  return prisma.$transaction((tx) => fetchConversionJob(tx, id));
+  return prisma.transaction(async (tx) => fetchConversionJob(tx, id));
 }
 
 export async function createConversionJob(data: any, userId: number) {
-  return prisma.$transaction(async (tx) => {
-    const row = await tx.conversionJob.create({
-      data: {
+  return prisma.transaction(async (tx) => {{
+    const row = await tx.orm.public.ConversionJob.create({
         number: data.number ? String(data.number).trim() : await generateNumber(tx, 'conversionJob', 'CNV'),
         branchId: Number(data.branchId ?? 0) || null,
         sourceFileName: String(data.sourceFileName ?? '').trim(),
@@ -901,8 +852,7 @@ export async function createConversionJob(data: any, userId: number) {
         attachmentsCount: Number(data.attachmentsCount ?? 0) || 0,
         createdById: userId,
         updatedById: userId
-      }
-    });
+      });
 
     await appendAudit(tx, {
       branchId: row.branchId,
@@ -936,12 +886,12 @@ export async function createConversionJob(data: any, userId: number) {
     });
 
     return fetchConversionJob(tx, row.id);
-  });
+  }});
 }
 
 export async function updateConversionJob(id: number, data: any, userId: number) {
-  return prisma.$transaction(async (tx) => {
-    const current = await tx.conversionJob.findUnique({ where: { id } });
+  return prisma.transaction(async (tx) => {{
+    const current = await tx.orm.public.ConversionJob.first({ id });
     if (!current) throw Errors.notFound('مهمة التحويل غير موجودة');
     if (current.status === 'COMPLETED') throw Errors.business('لا يمكن تعديل مهمة مكتملة');
 
@@ -949,9 +899,7 @@ export async function updateConversionJob(id: number, data: any, userId: number)
     const sourceFormat = data.sourceFormat !== undefined ? String(data.sourceFormat).trim().toUpperCase() : current.sourceFormat;
     const targetFormat = data.targetFormat !== undefined ? String(data.targetFormat).trim().toUpperCase() : current.targetFormat;
 
-    await tx.conversionJob.update({
-      where: { id },
-      data: {
+    await tx.orm.public.ConversionJob.where((r) => qw(r, { id })).update({
         branchId,
         sourceFileName: data.sourceFileName !== undefined ? String(data.sourceFileName).trim() : current.sourceFileName,
         sourceFileUrl: data.sourceFileUrl !== undefined ? toText(data.sourceFileUrl) : current.sourceFileUrl,
@@ -959,8 +907,7 @@ export async function updateConversionJob(id: number, data: any, userId: number)
         targetFormat,
         attachmentsCount: data.attachmentsCount !== undefined ? Number(data.attachmentsCount) || 0 : current.attachmentsCount,
         updatedById: userId
-      }
-    });
+      }).then((r0) => r0!);
 
     await appendAudit(tx, {
       branchId,
@@ -989,19 +936,17 @@ export async function updateConversionJob(id: number, data: any, userId: number)
     });
 
     return fetchConversionJob(tx, id);
-  });
+  }});
 }
 
 export async function markConversionJobStatus(id: number, data: any, userId: number) {
-  return prisma.$transaction(async (tx) => {
-    const current = await tx.conversionJob.findUnique({ where: { id } });
+  return prisma.transaction(async (tx) => {{
+    const current = await tx.orm.public.ConversionJob.first({ id });
     if (!current) throw Errors.notFound('مهمة التحويل غير موجودة');
     const status = normalizeStatus(data.status);
     const now = new Date();
 
-    await tx.conversionJob.update({
-      where: { id },
-      data: {
+    await tx.orm.public.ConversionJob.where((r) => qw(r, { id })).update({
         status,
         completedAt: status === 'COMPLETED' ? now : status === 'QUEUED' ? null : current.completedAt,
         failedAt: status === 'FAILED' ? now : status === 'QUEUED' ? null : current.failedAt,
@@ -1010,8 +955,7 @@ export async function markConversionJobStatus(id: number, data: any, userId: num
         errorMessage: data.errorMessage !== undefined ? toText(data.errorMessage) : status === 'FAILED' ? current.errorMessage : null,
         approvalStatus: status === 'COMPLETED' ? 'APPROVED' : current.approvalStatus,
         updatedById: userId
-      }
-    });
+      }).then((r0) => r0!);
 
     const next = await fetchConversionJob(tx, id);
 
@@ -1050,7 +994,7 @@ export async function markConversionJobStatus(id: number, data: any, userId: num
     });
 
     return next;
-  });
+  }});
 }
 
 export async function listPrintAudits(query: any) {
@@ -1068,19 +1012,8 @@ export async function listPrintAudits(query: any) {
   }
 
   const [rows, total] = await Promise.all([
-    prisma.printAudit.findMany({
-      where,
-      skip: pageState.skip,
-      take: pageState.limit,
-      include: {
-        branch: { select: { id: true, code: true, nameAr: true } },
-        printJob: { select: { id: true, number: true, status: true } },
-        exportJob: { select: { id: true, number: true, status: true } },
-        conversionJob: { select: { id: true, number: true, status: true } }
-      },
-      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }]
-    }),
-    prisma.printAudit.count({ where })
+    prisma.orm.public.PrintAudit.where((r) => qw(r, where)).include('branch', (inc) => inc.select('id', 'code', 'nameAr')).include('printJob', (inc) => inc.select('id', 'number', 'status')).include('exportJob', (inc) => inc.select('id', 'number', 'status')).include('conversionJob', (inc) => inc.select('id', 'number', 'status')).orderBy([(r) => r.createdAt.desc(), (r) => r.id.desc()]).offset(pageState.skip).limit(pageState.limit).all(),
+    prisma.orm.public.PrintAudit.where((r) => qw(r, where)).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n)
   ]);
 
   return {

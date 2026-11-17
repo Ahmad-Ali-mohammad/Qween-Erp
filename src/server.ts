@@ -1,14 +1,15 @@
-﻿import { app } from './app';
+import { app } from './app';
 import { connectWithRetry, disconnectDb } from './config/database';
-import { env } from './config/env';
 import { logger } from './config/logger';
+import service from './service.mjs';
 import { startOutboxWorker, stopOutboxWorker } from './platform/events/worker';
 
 async function start() {
   await connectWithRetry();
   startOutboxWorker();
-  app.listen(env.port, () => {
-    logger.info(`Server running on port ${env.port}`);
+  const port = service.port();
+  app.listen(port, '0.0.0.0', () => {
+    logger.info(`Server running on port ${port}`);
   });
 }
 

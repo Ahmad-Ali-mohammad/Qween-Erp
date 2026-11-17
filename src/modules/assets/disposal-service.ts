@@ -1,3 +1,4 @@
+import { qw } from '../../utils/where';
 import { Prisma } from '@prisma/client';
 import { prisma } from '../../config/database';
 import { buildSequentialNumberFromLatest } from '../../utils/id-generator';
@@ -33,31 +34,24 @@ export async function disposeAsset(input: DisposeAssetInput) {
   const salePrice = roundAmount(salePriceRaw);
   const disposedAt = parseDisposeDate(input.disposedAt);
 
-  return prisma.$transaction(async (tx) => {
-    const asset = await tx.fixedAsset.findUnique({
-      where: { id: input.assetId },
-      include: { category: true }
-    });
+  return prisma.transaction(async (tx) => {{
+    const asset = await tx.orm.public.FixedAsset.include('category').first({ id: input.assetId });
     if (!asset) throw Errors.notFound('الأصل غير موجود');
     if (asset.status === 'SOLD' || asset.status === 'SCRAPPED') {
       throw Errors.business('تم صرف الأصل مسبقاً');
     }
 
-    const period = await tx.accountingPeriod.findFirst({
-      where: {
+    const period = await tx.orm.public.AccountingPeriod.include('fiscalYear').orderBy([(r) => r.fiscalYearId.desc(), (r) => r.id.desc()]).first((r) => qw(r, {
         startDate: { lte: disposedAt },
         endDate: { gte: disposedAt },
         status: 'OPEN',
         canPost: true,
         fiscalYear: { status: 'OPEN' }
-      },
-      include: { fiscalYear: true },
-      orderBy: [{ fiscalYearId: 'desc' }, { id: 'desc' }]
-    });
+      }));
     if (!period) throw Errors.business('لا توجد فترة محاسبية مفتوحة لتسجيل صرف الأصل');
 
     const reference = `ASSET-DISPOSE-${asset.id}`;
-    const existing = await tx.journalEntry.findFirst({ where: { reference }, orderBy: { id: 'desc' } });
+    const existing = await tx.orm.public.JournalEntry.orderBy((r) => r.id.desc()).first({ reference });
     if (existing) throw Errors.business('يوجد قيد صرف سابق لهذا الأصل');
 
     const postingAccounts = await resolvePostingAccounts(tx as any);
@@ -118,15 +112,10 @@ export async function disposeAsset(input: DisposeAssetInput) {
     }
 
     const year = disposedAt.getUTCFullYear();
-    const latest = await tx.journalEntry.findFirst({
-      where: { entryNumber: { startsWith: `DSP-${year}-` } },
-      select: { entryNumber: true },
-      orderBy: { entryNumber: 'desc' }
-    });
+    const latest = await tx.orm.public.JournalEntry.select('entryNumber').orderBy((r) => r.entryNumber.desc()).first((r) => qw(r, { entryNumber: { startsWith: `DSP-${year}-` } }));
     const entryNumber = buildSequentialNumberFromLatest('DSP', latest?.entryNumber, year);
 
-    const entry = await tx.journalEntry.create({
-      data: {
+    const entry = await tx.orm.public.JournalEntry.create({
         entryNumber,
         date: disposedAt,
         periodId: period.id,
@@ -148,11 +137,10 @@ export async function disposeAsset(input: DisposeAssetInput) {
             description: line.description
           }))
         }
-      }
-    });
+      });
 
     await applyLedgerLines(
-      tx as unknown as Prisma.TransactionClient,
+      tx as unknown as any,
       disposedAt,
       period.number,
       lines.map((line) => ({
@@ -174,15 +162,12 @@ export async function disposeAsset(input: DisposeAssetInput) {
       .filter(Boolean)
       .join('\n');
 
-    const updatedAsset = await tx.fixedAsset.update({
-      where: { id: asset.id },
-      data: {
+    const updatedAsset = await tx.orm.public.FixedAsset.where((r) => qw(r, { id: asset.id })).update({
         status: nextStatus,
         isDepreciating: false,
         netBookValue: 0,
         notes: updatedNotes
-      }
-    });
+      }).then((r0) => r0!);
 
     return {
       asset: updatedAsset,
@@ -193,5 +178,5 @@ export async function disposeAsset(input: DisposeAssetInput) {
       gainLoss,
       status: nextStatus
     };
-  });
+  }});
 }

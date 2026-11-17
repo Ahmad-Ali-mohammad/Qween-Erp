@@ -32,10 +32,7 @@ export async function authenticate(req: AuthRequest, res: Response, next: NextFu
 
   try {
     const decoded = jwt.verify(token, env.jwtSecret) as TokenPayload;
-    const user = await prisma.user.findUnique({
-      where: { id: decoded.id },
-      include: { role: true }
-    });
+    const user = await prisma.orm.public.User.include('role').first({ id: decoded.id });
 
     if (!user || !user.isActive) {
       fail(res, ERROR_CODES.UNAUTHORIZED, 'المستخدم غير نشط أو غير موجود', 401);

@@ -1,3 +1,4 @@
+import { qw } from '../../utils/where';
 import { prisma } from '../../config/database';
 import { enqueueOutboxEvent } from '../../platform/events/outbox';
 import { parseDateOrThrow } from '../../utils/date';
@@ -565,7 +566,7 @@ export async function listScenarios(query: any) {
     }
   }
 
-  return prisma.$transaction(async (tx) => {
+  return prisma.transaction(async (tx) => {{
     const [rows, total] = await Promise.all([
       tx.budgetScenario.findMany({
         where,
@@ -577,7 +578,7 @@ export async function listScenarios(query: any) {
         },
         orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }]
       }),
-      tx.budgetScenario.count({ where })
+      tx.orm.public.BudgetScenario.where((r) => qw(r, where)).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n)
     ]);
 
     return {
@@ -589,23 +590,22 @@ export async function listScenarios(query: any) {
         pages: Math.max(1, Math.ceil(total / pageState.limit))
       }
     };
-  });
+  }});
 }
 
 export async function getScenario(id: number) {
-  return prisma.$transaction(async (tx) => {
+  return prisma.transaction(async (tx) => {{
     const row = await fetchScenario(tx, id);
     return (await enrichScenarioRows(tx, [row]))[0];
-  });
+  }});
 }
 
 export async function createScenario(data: any, userId: number) {
-  return prisma.$transaction(async (tx) => {
+  return prisma.transaction(async (tx) => {{
     const branchId = toPositiveInt(data.branchId, 'branchId', true);
     await ensureBranch(tx, branchId);
 
-    const row = await tx.budgetScenario.create({
-      data: {
+    const row = await tx.orm.public.BudgetScenario.create({
         code: String(data.code ?? '').trim(),
         nameAr: String(data.nameAr ?? '').trim(),
         nameEn: toText(data.nameEn),
@@ -619,8 +619,7 @@ export async function createScenario(data: any, userId: number) {
         attachmentsCount: Number(data.attachmentsCount ?? 0) || 0,
         createdById: userId,
         updatedById: userId
-      }
-    });
+      });
 
     await enqueueOutboxEvent(tx, {
       eventType: 'budgeting.scenario.created',
@@ -639,18 +638,16 @@ export async function createScenario(data: any, userId: number) {
     });
 
     return getScenarioWithinTx(tx, row.id);
-  });
+  }});
 }
 
 export async function updateScenario(id: number, data: any, userId: number) {
-  return prisma.$transaction(async (tx) => {
+  return prisma.transaction(async (tx) => {{
     const current = await fetchScenario(tx, id);
     const branchId = data.branchId !== undefined ? toPositiveInt(data.branchId, 'branchId', true) : current.branchId;
     await ensureBranch(tx, branchId);
 
-    const row = await tx.budgetScenario.update({
-      where: { id },
-      data: {
+    const row = await tx.orm.public.BudgetScenario.where((r) => qw(r, { id })).update({
         code: data.code !== undefined ? String(data.code).trim() : current.code,
         nameAr: data.nameAr !== undefined ? String(data.nameAr).trim() : current.nameAr,
         nameEn: data.nameEn !== undefined ? toText(data.nameEn) : current.nameEn,
@@ -665,38 +662,31 @@ export async function updateScenario(id: number, data: any, userId: number) {
         notes: data.notes !== undefined ? toText(data.notes) : current.notes,
         attachmentsCount: data.attachmentsCount !== undefined ? Number(data.attachmentsCount) || 0 : current.attachmentsCount,
         updatedById: userId
-      }
-    });
+      }).then((r0) => r0!);
 
     if (current.legacyBudgetId) {
-      await tx.budget.update({
-        where: { id: current.legacyBudgetId },
-        data: {
+      await tx.orm.public.Budget.where((r) => qw(r, { id: current.legacyBudgetId })).update({
           nameAr: row.nameAr,
           nameEn: row.nameEn,
           fiscalYear: row.fiscalYear,
           controlLevel: row.controlLevel
-        }
-      });
+        }).then((r0) => r0!);
     }
 
     return getScenarioWithinTx(tx, row.id);
-  });
+  }});
 }
 
 export async function submitScenario(id: number, userId: number) {
-  return prisma.$transaction(async (tx) => {
+  return prisma.transaction(async (tx) => {{
     const current = await fetchScenario(tx, id);
     if (current.approvalStatus === 'APPROVED') throw Errors.business('تم اعتماد السيناريو بالفعل');
 
-    const row = await tx.budgetScenario.update({
-      where: { id },
-      data: {
+    const row = await tx.orm.public.BudgetScenario.where((r) => qw(r, { id })).update({
         status: 'SUBMITTED',
         approvalStatus: 'PENDING',
         updatedById: userId
-      }
-    });
+      }).then((r0) => r0!);
 
     await enqueueOutboxEvent(tx, {
       eventType: 'budgeting.scenario.submitted',
@@ -712,20 +702,17 @@ export async function submitScenario(id: number, userId: number) {
     });
 
     return getScenarioWithinTx(tx, id);
-  });
+  }});
 }
 
 export async function approveScenario(id: number, userId: number) {
-  return prisma.$transaction(async (tx) => {
+  return prisma.transaction(async (tx) => {{
     const current = await fetchScenario(tx, id);
-    const row = await tx.budgetScenario.update({
-      where: { id },
-      data: {
+    const row = await tx.orm.public.BudgetScenario.where((r) => qw(r, { id })).update({
         status: 'ACTIVE',
         approvalStatus: 'APPROVED',
         updatedById: userId
-      }
-    });
+      }).then((r0) => r0!);
 
     await enqueueOutboxEvent(tx, {
       eventType: 'budgeting.scenario.approved',
@@ -742,7 +729,7 @@ export async function approveScenario(id: number, userId: number) {
     });
 
     return getScenarioWithinTx(tx, id);
-  });
+  }});
 }
 
 export async function listVersions(query: any) {
@@ -752,7 +739,7 @@ export async function listVersions(query: any) {
   if (query.status) where.status = String(query.status).trim().toUpperCase();
   if (query.approvalStatus) where.approvalStatus = String(query.approvalStatus).trim().toUpperCase();
 
-  return prisma.$transaction(async (tx) => {
+  return prisma.transaction(async (tx) => {{
     const [rows, total] = await Promise.all([
       tx.budgetVersion.findMany({
         where,
@@ -764,7 +751,7 @@ export async function listVersions(query: any) {
         },
         orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }]
       }),
-      tx.budgetVersion.count({ where })
+      tx.orm.public.BudgetVersion.where((r) => qw(r, where)).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n)
     ]);
 
     return {
@@ -776,26 +763,25 @@ export async function listVersions(query: any) {
         pages: Math.max(1, Math.ceil(total / pageState.limit))
       }
     };
-  });
+  }});
 }
 
 export async function getVersion(id: number) {
-  return prisma.$transaction(async (tx) => {
+  return prisma.transaction(async (tx) => {{
     const row = await fetchVersion(tx, id);
     return (await enrichVersionRows(tx, [row]))[0];
-  });
+  }});
 }
 
 export async function createVersion(data: any, userId: number) {
-  return prisma.$transaction(async (tx) => {
+  return prisma.transaction(async (tx) => {{
     const scenario = await fetchScenario(tx, Number(data.scenarioId));
     const nextVersionNumber =
       data.versionNumber !== undefined
         ? Number(data.versionNumber)
-        : (await tx.budgetVersion.count({ where: { scenarioId: scenario.id } })) + 1;
+        : (await tx.orm.public.BudgetVersion.where((r) => qw(r, { scenarioId: scenario.id })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n)) + 1;
 
-    const row = await tx.budgetVersion.create({
-      data: {
+    const row = await tx.orm.public.BudgetVersion.create({
         scenarioId: scenario.id,
         label: String(data.label ?? '').trim(),
         versionNumber: nextVersionNumber,
@@ -807,20 +793,17 @@ export async function createVersion(data: any, userId: number) {
         attachmentsCount: Number(data.attachmentsCount ?? 0) || 0,
         createdById: userId,
         updatedById: userId
-      }
-    });
+      });
 
     await syncLegacyBudgetForVersion(tx, row.id);
     return getVersionWithinTx(tx, row.id);
-  });
+  }});
 }
 
 export async function updateVersion(id: number, data: any, userId: number) {
-  return prisma.$transaction(async (tx) => {
+  return prisma.transaction(async (tx) => {{
     const current = await fetchVersion(tx, id);
-    const row = await tx.budgetVersion.update({
-      where: { id },
-      data: {
+    const row = await tx.orm.public.BudgetVersion.where((r) => qw(r, { id })).update({
         label: data.label !== undefined ? String(data.label).trim() : current.label,
         versionNumber: data.versionNumber !== undefined ? Number(data.versionNumber) : current.versionNumber,
         effectiveDate:
@@ -833,66 +816,50 @@ export async function updateVersion(id: number, data: any, userId: number) {
         notes: data.notes !== undefined ? toText(data.notes) : current.notes,
         attachmentsCount: data.attachmentsCount !== undefined ? Number(data.attachmentsCount) || 0 : current.attachmentsCount,
         updatedById: userId
-      }
-    });
+      }).then((r0) => r0!);
 
     await syncLegacyBudgetForVersion(tx, row.id);
     return getVersionWithinTx(tx, row.id);
-  });
+  }});
 }
 
 export async function publishVersion(id: number, data: any, userId: number) {
-  return prisma.$transaction(async (tx) => {
+  return prisma.transaction(async (tx) => {{
     const current = await fetchVersion(tx, id);
     if (!current._count.allocations) throw Errors.business('لا يمكن نشر إصدار بدون تخصيصات');
 
-    await tx.budgetVersion.updateMany({
-      where: {
+    await tx.orm.public.BudgetVersion.where((r) => qw(r, {
         scenarioId: current.scenarioId,
         id: { not: id },
         status: 'PUBLISHED'
-      },
-      data: {
+      })).updateAndCount({
         status: 'ARCHIVED',
         updatedById: userId
-      }
-    });
+      }).then((n0) => ({ count: n0 }));
 
-    const row = await tx.budgetVersion.update({
-      where: { id },
-      data: {
+    const row = await tx.orm.public.BudgetVersion.where((r) => qw(r, { id })).update({
         status: 'PUBLISHED',
         approvalStatus: 'APPROVED',
         publishedAt: new Date(),
         notes: data.notes !== undefined ? toText(data.notes) : current.notes,
         updatedById: userId
-      }
-    });
+      }).then((r0) => r0!);
 
-    await tx.budgetScenario.update({
-      where: { id: current.scenarioId },
-      data: {
+    await tx.orm.public.BudgetScenario.where((r) => qw(r, { id: current.scenarioId })).update({
         status: 'ACTIVE',
         approvalStatus: 'APPROVED',
         legacyBudgetId: row.legacyBudgetId,
         publishedVersionId: row.id,
         updatedById: userId
-      }
-    });
+      }).then((r0) => r0!);
 
     await syncLegacyBudgetForVersion(tx, id);
     if (row.legacyBudgetId) {
-      await tx.budget.update({
-        where: { id: row.legacyBudgetId },
-        data: { status: 'ACTIVE' }
-      });
-      await tx.budget.updateMany({
-        where: {
+      await tx.orm.public.Budget.where((r) => qw(r, { id: row.legacyBudgetId })).update({ status: 'ACTIVE' }).then((r0) => r0!);
+      await tx.orm.public.Budget.where((r) => qw(r, {
           id: { not: row.legacyBudgetId },
           code: { startsWith: `${current.scenario.code}-V` }
-        },
-        data: { status: 'CLOSED' }
-      });
+        })).updateAndCount({ status: 'CLOSED' }).then((n0) => ({ count: n0 }));
     }
 
     await enqueueOutboxEvent(tx, {
@@ -912,7 +879,7 @@ export async function publishVersion(id: number, data: any, userId: number) {
     });
 
     return getVersionWithinTx(tx, id);
-  });
+  }});
 }
 
 export async function listAllocations(query: any) {
@@ -924,15 +891,10 @@ export async function listAllocations(query: any) {
   if (query.projectId) where.projectId = Number(query.projectId);
   if (query.period) where.period = Number(query.period);
 
-  return prisma.$transaction(async (tx) => {
+  return prisma.transaction(async (tx) => {{
     const [rows, total] = await Promise.all([
-      tx.budgetAllocation.findMany({
-        where,
-        skip: pageState.skip,
-        take: pageState.limit,
-        orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }]
-      }),
-      tx.budgetAllocation.count({ where })
+      tx.orm.public.BudgetAllocation.where((r) => qw(r, where)).orderBy([(r) => r.updatedAt.desc(), (r) => r.id.desc()]).offset(pageState.skip).limit(pageState.limit).all(),
+      tx.orm.public.BudgetAllocation.where((r) => qw(r, where)).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n)
     ]);
 
     return {
@@ -944,11 +906,11 @@ export async function listAllocations(query: any) {
         pages: Math.max(1, Math.ceil(total / pageState.limit))
       }
     };
-  });
+  }});
 }
 
 export async function upsertAllocations(data: any, userId: number) {
-  return prisma.$transaction(async (tx) => {
+  return prisma.transaction(async (tx) => {{
     const version = await fetchVersion(tx, Number(data.versionId));
     const scenarioId = data.scenarioId ? Number(data.scenarioId) : version.scenarioId;
     if (scenarioId !== version.scenarioId) throw Errors.validation('scenarioId لا يطابق الإصدار المحدد');
@@ -986,29 +948,7 @@ export async function upsertAllocations(data: any, userId: number) {
         contractId
       });
 
-      await tx.budgetAllocation.upsert({
-        where: { allocationKey },
-        update: {
-          scenarioId: version.scenarioId,
-          branchId,
-          accountId,
-          projectId,
-          costCenterId,
-          departmentId,
-          contractId,
-          period,
-          plannedAmount,
-          actualAmount,
-          committedAmount,
-          varianceAmount,
-          status: normalizeStatus(allocationInput.status, 'ACTIVE'),
-          approvalStatus: normalizeApprovalStatus(allocationInput.approvalStatus, 'DRAFT'),
-          postingStatus: normalizePostingStatus(allocationInput.postingStatus, 'NOT_APPLICABLE'),
-          attachmentsCount: Number(allocationInput.attachmentsCount ?? 0) || 0,
-          note: allocationInput.note !== undefined ? toText(allocationInput.note) : null,
-          updatedById: userId
-        },
-        create: {
+      await tx.orm.public.BudgetAllocation.upsert({ create: {
           allocationKey,
           scenarioId: version.scenarioId,
           versionId: version.id,
@@ -1030,8 +970,26 @@ export async function upsertAllocations(data: any, userId: number) {
           note: toText(allocationInput.note),
           createdById: userId,
           updatedById: userId
-        }
-      });
+        }, update: {
+          scenarioId: version.scenarioId,
+          branchId,
+          accountId,
+          projectId,
+          costCenterId,
+          departmentId,
+          contractId,
+          period,
+          plannedAmount,
+          actualAmount,
+          committedAmount,
+          varianceAmount,
+          status: normalizeStatus(allocationInput.status, 'ACTIVE'),
+          approvalStatus: normalizeApprovalStatus(allocationInput.approvalStatus, 'DRAFT'),
+          postingStatus: normalizePostingStatus(allocationInput.postingStatus, 'NOT_APPLICABLE'),
+          attachmentsCount: Number(allocationInput.attachmentsCount ?? 0) || 0,
+          note: allocationInput.note !== undefined ? toText(allocationInput.note) : null,
+          updatedById: userId
+        }, conflictOn: { allocationKey } });
     }
 
     await syncLegacyBudgetForVersion(tx, version.id);
@@ -1057,7 +1015,7 @@ export async function upsertAllocations(data: any, userId: number) {
     }
 
     return listAllocationsWithinTx(tx, { versionId: version.id, page: 1, limit: 200 });
-  });
+  }});
 }
 
 export async function listForecastSnapshots(query: any) {
@@ -1067,15 +1025,10 @@ export async function listForecastSnapshots(query: any) {
   if (query.scenarioId) where.scenarioId = Number(query.scenarioId);
   if (query.branchId) where.branchId = Number(query.branchId);
 
-  return prisma.$transaction(async (tx) => {
+  return prisma.transaction(async (tx) => {{
     const [rows, total] = await Promise.all([
-      tx.forecastSnapshot.findMany({
-        where,
-        skip: pageState.skip,
-        take: pageState.limit,
-        orderBy: [{ snapshotDate: 'desc' }, { id: 'desc' }]
-      }),
-      tx.forecastSnapshot.count({ where })
+      tx.orm.public.ForecastSnapshot.where((r) => qw(r, where)).orderBy([(r) => r.snapshotDate.desc(), (r) => r.id.desc()]).offset(pageState.skip).limit(pageState.limit).all(),
+      tx.orm.public.ForecastSnapshot.where((r) => qw(r, where)).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n)
     ]);
 
     const versionIds = rows
@@ -1104,11 +1057,11 @@ export async function listForecastSnapshots(query: any) {
         pages: Math.max(1, Math.ceil(total / pageState.limit))
       }
     };
-  });
+  }});
 }
 
 export async function createForecastSnapshot(data: any, userId: number) {
-  return prisma.$transaction(async (tx) => {
+  return prisma.transaction(async (tx) => {{
     const version = await fetchVersion(tx, Number(data.versionId));
     const branchId = toPositiveInt(data.branchId ?? version.scenario.branchId, 'branchId', true);
     await ensureBranch(tx, branchId);
@@ -1117,8 +1070,7 @@ export async function createForecastSnapshot(data: any, userId: number) {
     const label = String(data.label ?? `Forecast ${monthKey(snapshotDate)}`).trim();
     const forecastTotal = currentForecastTotal(version);
 
-    const row = await tx.forecastSnapshot.create({
-      data: {
+    const row = await tx.orm.public.ForecastSnapshot.create({
         scenarioId: version.scenarioId,
         versionId: version.id,
         branchId,
@@ -1134,8 +1086,7 @@ export async function createForecastSnapshot(data: any, userId: number) {
         notes: toText(data.notes),
         createdById: userId,
         updatedById: userId
-      }
-    });
+      });
 
     await enqueueOutboxEvent(tx, {
       eventType: 'budgeting.forecast.snapshot.created',
@@ -1153,7 +1104,7 @@ export async function createForecastSnapshot(data: any, userId: number) {
     });
 
     return row;
-  });
+  }});
 }
 
 export async function listVariances(query: any) {
@@ -1166,15 +1117,10 @@ export async function listVariances(query: any) {
   if (query.severity) where.severity = String(query.severity).trim().toUpperCase();
   if (query.status) where.status = String(query.status).trim().toUpperCase();
 
-  return prisma.$transaction(async (tx) => {
+  return prisma.transaction(async (tx) => {{
     const [rows, total] = await Promise.all([
-      tx.varianceEntry.findMany({
-        where,
-        skip: pageState.skip,
-        take: pageState.limit,
-        orderBy: [{ detectedAt: 'desc' }, { id: 'desc' }]
-      }),
-      tx.varianceEntry.count({ where })
+      tx.orm.public.VarianceEntry.where((r) => qw(r, where)).orderBy([(r) => r.detectedAt.desc(), (r) => r.id.desc()]).offset(pageState.skip).limit(pageState.limit).all(),
+      tx.orm.public.VarianceEntry.where((r) => qw(r, where)).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n)
     ]);
 
     const summary = rows.reduce(
@@ -1201,23 +1147,15 @@ export async function listVariances(query: any) {
         summary
       }
     };
-  });
+  }});
 }
 
 export async function listLegacyBudgets() {
-  return prisma.budget.findMany({ include: { lines: true }, orderBy: { id: 'desc' } });
+  return prisma.orm.public.Budget.include('lines').orderBy((r) => r.id.desc()).all();
 }
 
 export async function getLegacyBudget(id: number) {
-  return prisma.budget.findUnique({
-    where: { id },
-    include: {
-      lines: {
-        include: { account: true },
-        orderBy: { period: 'asc' }
-      }
-    }
-  });
+  return prisma.orm.public.Budget.include('lines', (inc) => inc.include('account').orderBy((r) => r.period.asc())).first({ id });
 }
 
 export async function createLegacyBudget(data: any, userId: number) {
@@ -1256,24 +1194,16 @@ export async function createLegacyBudget(data: any, userId: number) {
 }
 
 export async function updateLegacyBudget(id: number, data: any, userId: number) {
-  const mappedVersion = await prisma.budgetVersion.findFirst({
-    where: { legacyBudgetId: id },
-    include: { scenario: true }
-  });
+  const mappedVersion = await prisma.orm.public.BudgetVersion.include('scenario').first({ legacyBudgetId: id });
   if (!mappedVersion) {
-    return prisma.budget.update({ where: { id }, data });
+    return prisma.orm.public.Budget.where((r) => qw(r, { id })).update(data).then((r0) => r0!);
   }
 
-  await prisma.$transaction(async (tx) => {
-    const currentVersion = await tx.budgetVersion.findUnique({
-      where: { id: mappedVersion.id },
-      include: { scenario: true }
-    });
+  await prisma.transaction(async (tx) => {{
+    const currentVersion = await tx.orm.public.BudgetVersion.include('scenario').first({ id: mappedVersion.id });
     if (!currentVersion) throw Errors.notFound('إصدار الموازنة غير موجود');
 
-    await tx.budgetScenario.update({
-      where: { id: currentVersion.scenarioId },
-      data: {
+    await tx.orm.public.BudgetScenario.where((r) => qw(r, { id: currentVersion.scenarioId })).update({
         code: data.code !== undefined ? String(data.code).trim() : currentVersion.scenario.code,
         nameAr: data.nameAr !== undefined ? String(data.nameAr).trim() : currentVersion.scenario.nameAr,
         nameEn: data.nameEn !== undefined ? toText(data.nameEn) : currentVersion.scenario.nameEn,
@@ -1281,19 +1211,15 @@ export async function updateLegacyBudget(id: number, data: any, userId: number) 
         controlLevel:
           data.controlLevel !== undefined ? normalizeControlLevel(data.controlLevel, currentVersion.scenario.controlLevel) : currentVersion.scenario.controlLevel,
         updatedById: userId
-      }
-    });
+      }).then((r0) => r0!);
 
-    await tx.budgetVersion.update({
-      where: { id: currentVersion.id },
-      data: {
+    await tx.orm.public.BudgetVersion.where((r) => qw(r, { id: currentVersion.id })).update({
         label: data.version !== undefined ? String(data.version).trim() : currentVersion.label,
         updatedById: userId
-      }
-    });
+      }).then((r0) => r0!);
 
     await syncLegacyBudgetForVersion(tx, currentVersion.id);
-  });
+  }});
 
   if (String(data.status ?? '').toUpperCase() === 'ACTIVE') {
     await publishVersion(mappedVersion.id, {}, userId);
@@ -1303,9 +1229,9 @@ export async function updateLegacyBudget(id: number, data: any, userId: number) 
 }
 
 export async function approveLegacyBudget(id: number, userId: number) {
-  const mappedVersion = await prisma.budgetVersion.findFirst({ where: { legacyBudgetId: id } });
+  const mappedVersion = await prisma.orm.public.BudgetVersion.first({ legacyBudgetId: id });
   if (!mappedVersion) {
-    await prisma.budget.update({ where: { id }, data: { status: 'ACTIVE' } });
+    await prisma.orm.public.Budget.where((r) => qw(r, { id })).update({ status: 'ACTIVE' }).then((r0) => r0!);
     return getLegacyBudget(id);
   }
   await publishVersion(mappedVersion.id, {}, userId);
@@ -1313,47 +1239,40 @@ export async function approveLegacyBudget(id: number, userId: number) {
 }
 
 export async function deleteLegacyBudget(id: number) {
-  return prisma.$transaction(async (tx) => {
-    const mappedVersion = await tx.budgetVersion.findFirst({
-      where: { legacyBudgetId: id },
-      select: { id: true, scenarioId: true }
-    });
+  return prisma.transaction(async (tx) => {{
+    const mappedVersion = await tx.orm.public.BudgetVersion.select('id', 'scenarioId').first({ legacyBudgetId: id });
 
     if (!mappedVersion) {
-      await tx.budget.delete({ where: { id } });
+      await tx.orm.public.Budget.where((r) => qw(r, { id })).delete().then((r0) => r0!);
       return { deleted: true };
     }
 
-    await tx.varianceEntry.deleteMany({ where: { versionId: mappedVersion.id } });
-    await tx.forecastSnapshot.deleteMany({ where: { versionId: mappedVersion.id } });
-    await tx.budgetAllocation.deleteMany({ where: { versionId: mappedVersion.id } });
-    await tx.budgetVersion.delete({ where: { id: mappedVersion.id } });
-    await tx.budgetLine.deleteMany({ where: { budgetId: id } });
-    await tx.budget.delete({ where: { id } });
+    await tx.orm.public.VarianceEntry.where((r) => qw(r, { versionId: mappedVersion.id })).deleteAndCount().then((n0) => ({ count: n0 }));
+    await tx.orm.public.ForecastSnapshot.where((r) => qw(r, { versionId: mappedVersion.id })).deleteAndCount().then((n0) => ({ count: n0 }));
+    await tx.orm.public.BudgetAllocation.where((r) => qw(r, { versionId: mappedVersion.id })).deleteAndCount().then((n0) => ({ count: n0 }));
+    await tx.orm.public.BudgetVersion.where((r) => qw(r, { id: mappedVersion.id })).delete().then((r0) => r0!);
+    await tx.orm.public.BudgetLine.where((r) => qw(r, { budgetId: id })).deleteAndCount().then((n0) => ({ count: n0 }));
+    await tx.orm.public.Budget.where((r) => qw(r, { id })).delete().then((r0) => r0!);
 
-    const remainingVersions = await tx.budgetVersion.count({ where: { scenarioId: mappedVersion.scenarioId } });
+    const remainingVersions = await tx.orm.public.BudgetVersion.where((r) => qw(r, { scenarioId: mappedVersion.scenarioId })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n);
     if (!remainingVersions) {
-      await tx.budgetScenario.delete({ where: { id: mappedVersion.scenarioId } });
+      await tx.orm.public.BudgetScenario.where((r) => qw(r, { id: mappedVersion.scenarioId })).delete().then((r0) => r0!);
     }
 
     return { deleted: true };
-  });
+  }});
 }
 
 export async function listLegacyBudgetLines(query: any) {
   const where: any = {};
   if (query.budgetId) where.budgetId = Number(query.budgetId);
-  return prisma.budgetLine.findMany({
-    where,
-    include: { budget: true, account: true },
-    orderBy: [{ budgetId: 'desc' }, { period: 'asc' }]
-  });
+  return prisma.orm.public.BudgetLine.where((r) => qw(r, where)).include('budget').include('account').orderBy([(r) => r.budgetId.desc(), (r) => r.period.asc()]).all();
 }
 
 export async function createLegacyBudgetLine(data: any, userId: number) {
-  const mappedVersion = await prisma.budgetVersion.findFirst({ where: { legacyBudgetId: Number(data.budgetId) } });
+  const mappedVersion = await prisma.orm.public.BudgetVersion.first((r) => qw(r, { legacyBudgetId: Number(data.budgetId) }));
   if (!mappedVersion) {
-    return prisma.budgetLine.create({ data });
+    return prisma.orm.public.BudgetLine.create(data);
   }
 
   await upsertAllocations(
@@ -1373,28 +1292,22 @@ export async function createLegacyBudgetLine(data: any, userId: number) {
     userId
   );
 
-  return prisma.budgetLine.findFirst({
-    where: {
+  return prisma.orm.public.BudgetLine.orderBy((r) => r.id.desc()).first((r) => qw(r, {
       budgetId: Number(data.budgetId),
       accountId: Number(data.accountId),
       period: Number(data.period)
-    },
-    orderBy: { id: 'desc' }
-  });
+    }));
 }
 
 export async function updateLegacyBudgetLine(id: number, data: any, userId: number) {
-  const current = await prisma.budgetLine.findUnique({ where: { id } });
+  const current = await prisma.orm.public.BudgetLine.first({ id });
   if (!current) throw Errors.notFound('بند الموازنة غير موجود');
-  const mappedVersion = await prisma.budgetVersion.findFirst({ where: { legacyBudgetId: current.budgetId } });
+  const mappedVersion = await prisma.orm.public.BudgetVersion.first({ legacyBudgetId: current.budgetId });
   if (!mappedVersion) {
-    return prisma.budgetLine.update({ where: { id }, data });
+    return prisma.orm.public.BudgetLine.where((r) => qw(r, { id })).update(data).then((r0) => r0!);
   }
 
-  const allocation = await prisma.budgetAllocation.findFirst({
-    where: { legacyLineId: id },
-    orderBy: { id: 'asc' }
-  });
+  const allocation = await prisma.orm.public.BudgetAllocation.orderBy((r) => r.id.asc()).first({ legacyLineId: id });
 
   await upsertAllocations(
     {
@@ -1414,35 +1327,28 @@ export async function updateLegacyBudgetLine(id: number, data: any, userId: numb
     userId
   );
 
-  return prisma.budgetLine.findUnique({ where: { id } });
+  return prisma.orm.public.BudgetLine.first({ id });
 }
 
 export async function deleteLegacyBudgetLine(id: number) {
-  return prisma.$transaction(async (tx) => {
-    const allocation = await tx.budgetAllocation.findFirst({
-      where: { legacyLineId: id },
-      select: { id: true, versionId: true }
-    });
+  return prisma.transaction(async (tx) => {{
+    const allocation = await tx.orm.public.BudgetAllocation.select('id', 'versionId').first({ legacyLineId: id });
 
     if (!allocation) {
-      await tx.budgetLine.delete({ where: { id } });
+      await tx.orm.public.BudgetLine.where((r) => qw(r, { id })).delete().then((r0) => r0!);
       return { deleted: true };
     }
 
-    await tx.budgetAllocation.delete({ where: { id: allocation.id } });
+    await tx.orm.public.BudgetAllocation.where((r) => qw(r, { id: allocation.id })).delete().then((r0) => r0!);
     await syncLegacyBudgetLinesForVersion(tx, allocation.versionId);
     await syncVersionTotals(tx, allocation.versionId);
     await syncVarianceEntriesForVersion(tx, allocation.versionId, null);
     return { deleted: true };
-  });
+  }});
 }
 
 export async function getLegacyBudgetVariance(budgetId: number) {
-  const lines = await prisma.budgetLine.findMany({
-    where: { budgetId },
-    include: { account: true },
-    orderBy: { period: 'asc' }
-  });
+  const lines = await prisma.orm.public.BudgetLine.where((r) => qw(r, { budgetId })).include('account').orderBy((r) => r.period.asc()).all();
   const summary = lines.reduce(
     (acc, row) => {
       acc.budget += Number(row.amount);
@@ -1456,5 +1362,5 @@ export async function getLegacyBudgetVariance(budgetId: number) {
 }
 
 export async function listLegacyBudgetSummary() {
-  return prisma.budget.findMany({ orderBy: { id: 'desc' } });
+  return prisma.orm.public.Budget.orderBy((r) => r.id.desc()).all();
 }

@@ -1,4 +1,5 @@
 ﻿import { Router } from 'express';
+import { qw } from '../../utils/where';
 import { z } from 'zod';
 import { prisma } from '../../config/database';
 import { authenticate } from '../../middleware/auth';
@@ -41,40 +42,38 @@ const router = Router();
 router.use(authenticate);
 
 router.get('/codes', requirePermissions(PERMISSIONS.TAX_READ), async (_req, res) => {
-  const rows = await prisma.taxCode.findMany({ orderBy: { id: 'desc' } });
+  const rows = await prisma.orm.public.TaxCode.orderBy((r) => r.id.desc()).all();
   ok(res, rows);
 });
 
 router.post('/codes', requirePermissions(PERMISSIONS.TAX_WRITE), validateBody(codeSchema), audit('tax_codes'), async (req, res) => {
-  const row = await prisma.taxCode.create({ data: req.body });
+  const row = await prisma.orm.public.TaxCode.create(req.body);
   ok(res, row, undefined, 201);
 });
 
 router.put('/codes/:id', requirePermissions(PERMISSIONS.TAX_WRITE), validateBody(codeSchema.partial()), audit('tax_codes'), async (req, res) => {
-  const row = await prisma.taxCode.update({ where: { id: Number(req.params.id) }, data: req.body });
+  const row = await prisma.orm.public.TaxCode.where((r) => qw(r, { id: Number(req.params.id) })).update(req.body).then((r0) => r0!);
   ok(res, row);
 });
 
 router.delete('/codes/:id', requirePermissions(PERMISSIONS.TAX_WRITE), audit('tax_codes'), async (req, res) => {
-  await prisma.taxCode.delete({ where: { id: Number(req.params.id) } });
+  await prisma.orm.public.TaxCode.where((r) => qw(r, { id: Number(req.params.id) })).delete().then((r0) => r0!);
   ok(res, { deleted: true });
 });
 
 router.get('/declarations', requirePermissions(PERMISSIONS.TAX_READ), async (_req, res) => {
-  const rows = await prisma.taxDeclaration.findMany({ orderBy: { id: 'desc' } });
+  const rows = await prisma.orm.public.TaxDeclaration.orderBy((r) => r.id.desc()).all();
   ok(res, rows);
 });
 
 router.post('/declarations', requirePermissions(PERMISSIONS.TAX_WRITE), validateBody(declarationSchema), audit('tax_declarations'), async (req, res) => {
-  const row = await prisma.taxDeclaration.create({
-    data: {
+  const row = await prisma.orm.public.TaxDeclaration.create({
       ...req.body,
       periodStart: new Date(req.body.periodStart),
       periodEnd: new Date(req.body.periodEnd),
       filedDate: req.body.filedDate ? new Date(req.body.filedDate) : null,
       paidDate: req.body.paidDate ? new Date(req.body.paidDate) : null
-    }
-  });
+    });
   ok(res, row, undefined, 201);
 });
 
@@ -84,12 +83,12 @@ router.put('/declarations/:id', requirePermissions(PERMISSIONS.TAX_WRITE), valid
   if (data.periodEnd) data.periodEnd = new Date(data.periodEnd);
   if (data.filedDate) data.filedDate = new Date(data.filedDate);
   if (data.paidDate) data.paidDate = new Date(data.paidDate);
-  const row = await prisma.taxDeclaration.update({ where: { id: Number(req.params.id) }, data });
+  const row = await prisma.orm.public.TaxDeclaration.where((r) => qw(r, { id: Number(req.params.id) })).update(data).then((r0) => r0!);
   ok(res, row);
 });
 
 router.delete('/declarations/:id', requirePermissions(PERMISSIONS.TAX_WRITE), audit('tax_declarations'), async (req, res) => {
-  await prisma.taxDeclaration.delete({ where: { id: Number(req.params.id) } });
+  await prisma.orm.public.TaxDeclaration.where((r) => qw(r, { id: Number(req.params.id) })).delete().then((r0) => r0!);
   ok(res, { deleted: true });
 });
 

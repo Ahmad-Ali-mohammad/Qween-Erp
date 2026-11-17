@@ -10,7 +10,7 @@ const router = Router();
 router.use(authenticate, requirePermissions(PERMISSIONS.ASSETS_READ));
 
 router.get('/', async (_req, res) => {
-  const rows = await prisma.depreciationSchedule.findMany({ include: { asset: true }, orderBy: [{ fiscalYear: 'desc' }, { period: 'desc' }] });
+  const rows = await prisma.orm.public.DepreciationSchedule.include('asset').orderBy([(r) => r.fiscalYear.desc(), (r) => r.period.desc()]).all();
   ok(res, rows);
 });
 

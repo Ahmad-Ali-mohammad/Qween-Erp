@@ -1,4 +1,5 @@
 ﻿import { Router } from 'express';
+import { qw } from '../../utils/where';
 import { z } from 'zod';
 import { prisma } from '../../config/database';
 import { authenticate } from '../../middleware/auth';
@@ -57,10 +58,7 @@ async function validatePostingAccountsInDb(raw: unknown) {
   const uniqueIds = [...new Set(Object.values(postingAccounts).filter((v): v is number => typeof v === 'number'))];
   if (!uniqueIds.length) return postingAccounts;
 
-  const rows = await prisma.account.findMany({
-    where: { id: { in: uniqueIds } },
-    select: { id: true, isActive: true, allowPosting: true, nameAr: true }
-  });
+  const rows = await prisma.orm.public.Account.where((r) => qw(r, { id: { in: uniqueIds } })).select('id', 'isActive', 'allowPosting', 'nameAr').all();
   const byId = new Map(rows.map((r) => [r.id, r]));
   for (const id of uniqueIds) {
     const row = byId.get(id);
@@ -75,17 +73,13 @@ const router = Router();
 router.use(authenticate);
 
 router.get('/company', requirePermissions(PERMISSIONS.SETTINGS_READ), async (_req, res) => {
-  const profile = await prisma.companyProfile.findUnique({ where: { id: 1 } });
+  const profile = await prisma.orm.public.CompanyProfile.first({ id: 1 });
   ok(res, profile);
 });
 
 router.put('/company', requirePermissions(PERMISSIONS.SETTINGS_WRITE), validateBody(companySchema), async (req, res, next) => {
   try {
-    const profile = await prisma.companyProfile.upsert({
-      where: { id: 1 },
-      update: req.body,
-      create: { id: 1, nameAr: req.body.nameAr ?? 'شركة واحدة', ...req.body }
-    });
+    const profile = await prisma.orm.public.CompanyProfile.upsert({ create: { id: 1, nameAr: req.body.nameAr ?? 'شركة واحدة', ...req.body }, update: req.body, conflictOn: { id: 1 } });
     ok(res, profile);
   } catch (error) {
     next(error);
@@ -93,13 +87,13 @@ router.put('/company', requirePermissions(PERMISSIONS.SETTINGS_WRITE), validateB
 });
 
 router.get('/system', requirePermissions(PERMISSIONS.SETTINGS_READ), async (_req, res) => {
-  const settings = await prisma.systemSettings.findUnique({ where: { id: 1 } });
+  const settings = await prisma.orm.public.SystemSettings.first({ id: 1 });
   const settingsData = (settings ?? {}) as Record<string, unknown>;
   ok(res, { ...settingsData, postingAccounts: settingsData.postingAccounts ?? {} });
 });
 
 router.get('/sequences', requirePermissions(PERMISSIONS.SETTINGS_READ), async (_req, res) => {
-  const settings = await prisma.systemSettings.findUnique({ where: { id: 1 } });
+  const settings = await prisma.orm.public.SystemSettings.first({ id: 1 });
   ok(res, {
     invoice: settings?.invoicePrefix ?? 'INV',
     quote: settings?.quotePrefix ?? 'QT',
@@ -111,11 +105,7 @@ router.get('/sequences', requirePermissions(PERMISSIONS.SETTINGS_READ), async (_
 router.put('/system', requirePermissions(PERMISSIONS.SETTINGS_WRITE), validateBody(systemSchema), async (req, res, next) => {
   try {
     const postingAccounts = await validatePostingAccountsInDb(req.body.postingAccounts);
-    const settings = await prisma.systemSettings.upsert({
-      where: { id: 1 },
-      update: { ...req.body, postingAccounts },
-      create: { id: 1, ...req.body, postingAccounts }
-    });
+    const settings = await prisma.orm.public.SystemSettings.upsert({ create: { id: 1, ...req.body, postingAccounts }, update: { ...req.body, postingAccounts }, conflictOn: { id: 1 } });
     ok(res, settings);
   } catch (error) {
     next(error);
@@ -133,11 +123,7 @@ router.put('/sequences/:entity', requirePermissions(PERMISSIONS.SETTINGS_WRITE),
     if (entity === 'quote' || entity === 'quotation') data.quotePrefix = prefix;
     if (!Object.keys(data).length) throw Errors.validation('entity غير مدعوم');
 
-    const settings = await prisma.systemSettings.upsert({
-      where: { id: 1 },
-      update: data,
-      create: { id: 1, ...data }
-    });
+    const settings = await prisma.orm.public.SystemSettings.upsert({ create: { id: 1, ...data }, update: data, conflictOn: { id: 1 } });
 
     ok(res, settings);
   } catch (error) {

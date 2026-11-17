@@ -8,8 +8,7 @@ export function audit(tableName: string) {
 
     res.json = ((body: any) => {
       if (res.statusCode < 400 && req.method !== 'GET') {
-        prisma.auditLog.create({
-          data: {
+        prisma.orm.public.AuditLog.create({
             userId: req.user?.id,
             table: tableName,
             recordId: body?.data?.id ? Number(body.data.id) : req.params.id ? Number(req.params.id) : null,
@@ -18,8 +17,7 @@ export function audit(tableName: string) {
             newValue: body?.data ?? undefined,
             ipAddress: req.ip,
             userAgent: req.get('user-agent') ?? null
-          }
-        }).catch(() => undefined);
+          }).catch(() => undefined);
       }
       return originalJson(body);
     }) as any;

@@ -1,7 +1,7 @@
-import { PrismaClient } from '@prisma/client';
+import type { Executor } from '../../config/database';
 import { Errors } from '../../utils/response';
 
-type TxLike = PrismaClient | any;
+type TxLike = Executor | any;
 
 type PostingAccountsConfig = {
   receivableAccountId?: number;
@@ -46,7 +46,7 @@ const FALLBACK_CODES = {
 } as const;
 
 async function validateAccountById(tx: TxLike, id: number, label: string): Promise<number> {
-  const account = await tx.account.findUnique({ where: { id } });
+  const account = await tx.orm.public.Account.first({ id });
   if (!account) throw Errors.business(`حساب ${label} غير موجود`);
   if (!account.isActive) throw Errors.business(`حساب ${label} غير نشط`);
   if (!account.allowPosting) throw Errors.business(`حساب ${label} غير قابل للترحيل`);
@@ -63,7 +63,7 @@ async function resolveAccountId(
     return validateAccountById(tx, configuredId, label);
   }
 
-  const account = await tx.account.findUnique({ where: { code: fallbackCode } });
+  const account = await tx.orm.public.Account.first({ code: fallbackCode });
   if (!account) throw Errors.business(`تعذر العثور على حساب ${label} الافتراضي (${fallbackCode})`);
   if (!account.isActive) throw Errors.business(`حساب ${label} الافتراضي غير نشط (${fallbackCode})`);
   if (!account.allowPosting) throw Errors.business(`حساب ${label} الافتراضي غير قابل للترحيل (${fallbackCode})`);
@@ -91,7 +91,7 @@ export function parsePostingAccounts(raw: unknown): PostingAccountsConfig {
 }
 
 export async function resolvePostingAccounts(tx: TxLike): Promise<PostingAccountsResolved> {
-  const settings = await tx.systemSettings.findUnique({ where: { id: 1 } });
+  const settings = await tx.orm.public.SystemSettings.first({ id: 1 });
   const configured = normalizePostingConfig(settings?.postingAccounts);
 
   return {

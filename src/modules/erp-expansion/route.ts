@@ -1,3 +1,4 @@
+import { qw } from '../../utils/where';
 import { Router, Request, Response } from 'express';
 import { Prisma } from '@prisma/client';
 import { z } from 'zod';
@@ -322,12 +323,12 @@ resources.forEach(registerCrudResource);
 router.post('/stock-counts/:id/approve', requirePermissions(PERMISSIONS.INVENTORY_WRITE), audit('stock_counts'), async (req: any, res: Response) => {
   const id = parseIdParam(req);
 
-  const approved = await prisma.$transaction(async (tx) => {
-    const countDoc = await tx.stockCount.findUnique({ where: { id } });
+  const approved = await prisma.transaction(async (tx) => {{
+    const countDoc = await tx.orm.public.StockCount.first({ id });
     if (!countDoc) throw Errors.notFound('جرد المخزون غير موجود');
     if (countDoc.status !== 'DRAFT') throw Errors.business('يمكن اعتماد جرد مسودة فقط');
 
-    const lines = await tx.stockCountLine.findMany({ where: { stockCountId: id } });
+    const lines = await tx.orm.public.StockCountLine.where((r) => qw(r, { stockCountId: id })).all();
     const adjustmentLines: Array<{ accountId: number; debit: number; credit: number; description: string }> = [];
     const postingAccounts = await resolvePostingAccounts(tx);
 
@@ -338,18 +339,14 @@ router.post('/stock-counts/:id/approve', requirePermissions(PERMISSIONS.INVENTOR
       const unitCost = Number(line.unitCost ?? 0);
       const differenceValue = differenceQty * unitCost;
 
-      await tx.stockCountLine.update({
-        where: { id: line.id },
-        data: {
+      await tx.orm.public.StockCountLine.where((r) => qw(r, { id: line.id })).update({
           differenceQty,
           differenceValue
-        }
-      });
+        }).then((r0) => r0!);
 
       if (differenceQty === 0) continue;
 
-      await tx.stockMovement.create({
-        data: {
+      await tx.orm.public.StockMovement.create({
           date: countDoc.date,
           type: 'ADJUSTMENT',
           reference: countDoc.number,
@@ -359,49 +356,38 @@ router.post('/stock-counts/:id/approve', requirePermissions(PERMISSIONS.INVENTOR
           unitCost,
           totalCost: differenceValue,
           notes: `اعتماد جرد ${countDoc.number}`
-        }
-      });
+        });
 
-      const existing = await tx.stockBalance.findFirst({
-        where: {
+      const existing = await tx.orm.public.StockBalance.first({
           itemId: line.itemId,
           warehouseId: countDoc.warehouseId,
           locationId: null
-        }
-      });
+        });
       const nextQty = Number(existing?.quantity ?? 0) + differenceQty;
       const nextValue = Number(existing?.value ?? 0) + differenceValue;
       const nextAvgCost = Math.abs(nextQty) < 0.000001 ? 0 : nextValue / nextQty;
 
       if (existing) {
-        await tx.stockBalance.update({
-          where: { id: existing.id },
-          data: {
+        await tx.orm.public.StockBalance.where((r) => qw(r, { id: existing.id })).update({
             quantity: nextQty,
             value: nextValue,
             avgCost: nextAvgCost
-          }
-        });
+          }).then((r0) => r0!);
       } else {
-        await tx.stockBalance.create({
-          data: {
+        await tx.orm.public.StockBalance.create({
             itemId: line.itemId,
             warehouseId: countDoc.warehouseId,
             locationId: null,
             quantity: nextQty,
             value: nextValue,
             avgCost: nextAvgCost
-          }
-        });
+          });
       }
 
-      await tx.item.update({
-        where: { id: line.itemId },
-        data: {
+      await tx.orm.public.Item.where((r) => qw(r, { id: line.itemId })).update({
           onHandQty: { increment: differenceQty },
           inventoryValue: { increment: differenceValue }
-        }
-      });
+        }).then((r0) => r0!);
 
       if (differenceValue > 0) {
         adjustmentLines.push({
@@ -434,19 +420,15 @@ router.post('/stock-counts/:id/approve', requirePermissions(PERMISSIONS.INVENTOR
     }
 
     if (adjustmentLines.length) {
-      const period = await tx.accountingPeriod.findFirst({
-        where: { startDate: { lte: countDoc.date }, endDate: { gte: countDoc.date }, status: 'OPEN', canPost: true },
-        include: { fiscalYear: true }
-      });
+      const period = await tx.orm.public.AccountingPeriod.include('fiscalYear').first((r) => qw(r, { startDate: { lte: countDoc.date }, endDate: { gte: countDoc.date }, status: 'OPEN', canPost: true }));
       if (!period || period.fiscalYear.status !== 'OPEN') throw Errors.business('لا توجد فترة محاسبية مفتوحة');
 
       const debit = adjustmentLines.reduce((s, l) => s + Number(l.debit), 0);
       const credit = adjustmentLines.reduce((s, l) => s + Number(l.credit), 0);
-      const seq = await tx.journalEntry.count();
+      const seq = await tx.orm.public.JournalEntry.aggregate((a) => ({ n: a.count() })).then((r0) => r0.n);
       const entryNumber = buildSequentialNumber('STKJ', seq, new Date(countDoc.date).getUTCFullYear());
 
-      const entry = await tx.journalEntry.create({
-        data: {
+      const entry = await tx.orm.public.JournalEntry.create({
           entryNumber,
           date: countDoc.date,
           periodId: period.id,
@@ -459,28 +441,22 @@ router.post('/stock-counts/:id/approve', requirePermissions(PERMISSIONS.INVENTOR
           createdById: Number(req.user.id),
           postedById: Number(req.user.id),
           postedAt: new Date()
-        }
-      });
+        });
 
-      await tx.journalLine.createMany({
-        data: adjustmentLines.map((line, idx) => ({
+      await tx.orm.public.JournalLine.createAll(adjustmentLines.map((line, idx) => ({
           entryId: entry.id,
           lineNumber: idx + 1,
           accountId: line.accountId,
           description: line.description,
           debit: line.debit,
           credit: line.credit
-        }))
-      });
+        }))).then((rows) => ({ count: rows.length }));
 
       await applyLedgerLines(tx, countDoc.date, period.number, adjustmentLines);
     }
 
-    return tx.stockCount.update({
-      where: { id },
-      data: { status: 'APPROVED' }
-    });
-  });
+    return tx.orm.public.StockCount.where((r) => qw(r, { id })).update({ status: 'APPROVED' }).then((r0) => r0!);
+  }});
 
   ok(res, approved);
 });
@@ -598,10 +574,7 @@ router.put(
 );
 
 router.get('/currency-diff', requirePermissions(PERMISSIONS.CURRENCY_READ), async (_req: Request, res: Response) => {
-  const rates = await prisma.exchangeRate.findMany({
-    orderBy: [{ currencyCode: 'asc' }, { rateDate: 'desc' }],
-    take: 1000
-  });
+  const rates = await prisma.orm.public.ExchangeRate.orderBy([(r) => r.currencyCode.asc(), (r) => r.rateDate.desc()]).limit(1000).all();
   const byCode = new Map<string, Array<{ rate: number; rateDate: Date }>>();
   for (const row of rates) {
     const arr = byCode.get(row.currencyCode) ?? [];
@@ -663,8 +636,8 @@ router.get('/tax-reports', requirePermissions(PERMISSIONS.TAX_READ), async (req:
     if (req.query.dateTo) where.periodStart.lte = new Date(String(req.query.dateTo));
   }
   const [rows, codes] = await Promise.all([
-    prisma.taxDeclaration.findMany({ where, orderBy: { id: 'desc' }, take: 500 }),
-    prisma.taxCode.findMany({ orderBy: { id: 'desc' } })
+    prisma.orm.public.TaxDeclaration.where((r) => qw(r, where)).orderBy((r) => r.id.desc()).limit(500).all(),
+    prisma.orm.public.TaxCode.orderBy((r) => r.id.desc()).all()
   ]);
   const summary = rows.reduce(
     (acc, row) => {

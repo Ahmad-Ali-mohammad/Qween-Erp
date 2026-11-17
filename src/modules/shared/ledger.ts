@@ -1,14 +1,15 @@
-﻿import { Prisma, PrismaClient } from '@prisma/client';
+import { and } from '@prisma/orm-postgres/orm-client';
+import type { Executor } from '../../config/database';
 import { decimalToNumber } from '../../utils/decimal';
 
 export type LedgerLineInput = {
   accountId: number;
-  debit: number | Prisma.Decimal;
-  credit: number | Prisma.Decimal;
+  debit: number | string;
+  credit: number | string;
 };
 
 export async function applyLedgerLines(
-  tx: Prisma.TransactionClient | PrismaClient,
+  tx: Executor,
   date: Date,
   period: number,
   lines: LedgerLineInput[]
@@ -20,28 +21,25 @@ export async function applyLedgerLines(
     const credit = decimalToNumber(line.credit as any);
     const net = debit - credit;
 
-    await (tx as any).accountBalance.upsert({
-      where: {
-        accountId_fiscalYear_period: {
-          accountId: line.accountId,
-          fiscalYear,
-          period
-        }
-      },
-      update: {
-        debit: { increment: debit },
-        credit: { increment: credit },
-        closingBalance: { increment: net }
-      },
-      create: {
+    const existing = await tx.orm.public.AccountBalance.first((r) =>
+      and(r.accountId.eq(line.accountId), r.fiscalYear.eq(fiscalYear), r.period.eq(period))
+    );
+    if (existing) {
+      await tx.orm.public.AccountBalance.where({ id: existing.id }).update({
+        debit: String(Number(existing.debit) + debit),
+        credit: String(Number(existing.credit) + credit),
+        closingBalance: String(Number(existing.closingBalance) + net)
+      });
+    } else {
+      await tx.orm.public.AccountBalance.create({
         accountId: line.accountId,
         fiscalYear,
         period,
-        openingBalance: 0,
-        debit,
-        credit,
-        closingBalance: net
-      }
-    });
+        openingBalance: '0',
+        debit: String(debit),
+        credit: String(credit),
+        closingBalance: String(net)
+      });
+    }
   }
 }

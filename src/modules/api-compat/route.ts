@@ -1,3 +1,4 @@
+import { qw } from '../../utils/where';
 import { Router, Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import { prisma } from '../../config/database';
@@ -64,10 +65,10 @@ router.post('/auth/reset-password', async (req: Request, res: Response) => {
   const username = String(req.body?.username ?? '').trim();
   const newPassword = String(req.body?.newPassword ?? '').trim();
   if (!username || newPassword.length < 6) throw Errors.validation('بيانات إعادة التعيين غير مكتملة');
-  const user = await prisma.user.findUnique({ where: { username } });
+  const user = await prisma.orm.public.User.first({ username });
   if (!user) throw Errors.notFound('المستخدم غير موجود');
   const password = await bcrypt.hash(newPassword, 10);
-  await prisma.user.update({ where: { id: user.id }, data: { password, failedLoginCount: 0, lockedUntil: null } });
+  await prisma.orm.public.User.where((r) => qw(r, { id: user.id })).update({ password, failedLoginCount: 0, lockedUntil: null }).then((r0) => r0!);
   ok(res, { reset: true });
 });
 
@@ -76,16 +77,8 @@ router.use(authenticate);
 // Quick Access
 router.get('/quick-journal/form-data', async (_req: Request, res: Response) => {
   const [accounts, periods] = await Promise.all([
-    prisma.account.findMany({
-      where: { isActive: true, allowPosting: true },
-      select: { id: true, code: true, nameAr: true, type: true },
-      orderBy: { code: 'asc' }
-    }),
-    prisma.accountingPeriod.findMany({
-      where: { status: 'OPEN', canPost: true },
-      include: { fiscalYear: true },
-      orderBy: [{ fiscalYearId: 'desc' }, { number: 'asc' }]
-    })
+    prisma.orm.public.Account.where((r) => qw(r, { isActive: true, allowPosting: true })).select('id', 'code', 'nameAr', 'type').orderBy((r) => r.code.asc()).all(),
+    prisma.orm.public.AccountingPeriod.where((r) => qw(r, { status: 'OPEN', canPost: true })).include('fiscalYear').orderBy([(r) => r.fiscalYearId.desc(), (r) => r.number.asc()]).all()
   ]);
   ok(res, { accounts, periods });
 });
@@ -123,12 +116,8 @@ router.post('/quick-journal', async (req: any, res: Response) => {
 
 router.get('/quick-invoice/form-data', async (_req: Request, res: Response) => {
   const [customers, products] = await Promise.all([
-    prisma.customer.findMany({ where: { isActive: true }, select: { id: true, code: true, nameAr: true }, orderBy: { code: 'asc' } }),
-    prisma.item.findMany({
-      where: { isActive: true },
-      select: { id: true, code: true, nameAr: true, salePrice: true, onHandQty: true },
-      orderBy: { code: 'asc' }
-    })
+    prisma.orm.public.Customer.where((r) => qw(r, { isActive: true })).select('id', 'code', 'nameAr').orderBy((r) => r.code.asc()).all(),
+    prisma.orm.public.Item.where((r) => qw(r, { isActive: true })).select('id', 'code', 'nameAr', 'salePrice', 'onHandQty').orderBy((r) => r.code.asc()).all()
   ]);
   ok(res, { customers, products });
 });
@@ -163,12 +152,8 @@ router.get('/quick-statement', async (req: Request, res: Response) => {
   const toDate = parseOptionalDate(req.query.toDate, new Date());
 
   if (entityType === 'ACCOUNT') {
-    const account = await prisma.account.findUnique({ where: { id: entityId } });
-    const lines = await prisma.journalLine.findMany({
-      where: { accountId: entityId, entry: { status: 'POSTED', date: { gte: fromDate, lte: toDate } } },
-      include: { entry: true },
-      orderBy: { entry: { date: 'asc' } }
-    });
+    const account = await prisma.orm.public.Account.first({ id: entityId });
+    const lines = await prisma.orm.public.JournalLine.where((r) => qw(r, { accountId: entityId, entry: { status: 'POSTED', date: { gte: fromDate, lte: toDate } } })).include('entry').orderBy((r) => r.entry.r.date.asc()).all();
     let balance = 0;
     const rows = lines.map((line) => {
       balance += Number(line.debit) - Number(line.credit);
@@ -186,24 +171,18 @@ router.get('/quick-statement', async (req: Request, res: Response) => {
   }
 
   const isCustomer = entityType === 'CUSTOMER';
-  const invoices = await prisma.invoice.findMany({
-    where: {
+  const invoices = await prisma.orm.public.Invoice.where((r) => qw(r, {
       type: isCustomer ? 'SALES' : 'PURCHASE',
       customerId: isCustomer ? entityId : undefined,
       supplierId: isCustomer ? undefined : entityId,
       date: { gte: fromDate, lte: toDate }
-    },
-    orderBy: { date: 'asc' }
-  });
-  const payments = await prisma.payment.findMany({
-    where: {
+    })).orderBy((r) => r.date.asc()).all();
+  const payments = await prisma.orm.public.Payment.where((r) => qw(r, {
       type: isCustomer ? 'RECEIPT' : 'PAYMENT',
       customerId: isCustomer ? entityId : undefined,
       supplierId: isCustomer ? undefined : entityId,
       date: { gte: fromDate, lte: toDate }
-    },
-    orderBy: { date: 'asc' }
-  });
+    })).orderBy((r) => r.date.asc()).all();
   ok(res, {
     entityType,
     entityId,
@@ -225,12 +204,12 @@ router.get('/search', async (req: Request, res: Response) => {
   }
   const contains = { contains: q, mode: 'insensitive' as const };
   const [customers, suppliers, journals, invoices, payments, products] = await Promise.all([
-    prisma.customer.findMany({ where: { OR: [{ nameAr: contains }, { code: contains }, { email: contains }] }, take: 20 }),
-    prisma.supplier.findMany({ where: { OR: [{ nameAr: contains }, { code: contains }, { email: contains }] }, take: 20 }),
-    prisma.journalEntry.findMany({ where: { OR: [{ entryNumber: contains }, { description: contains }, { reference: contains }] }, take: 20 }),
-    prisma.invoice.findMany({ where: { OR: [{ number: contains }, { notes: contains }] }, take: 20 }),
-    prisma.payment.findMany({ where: { OR: [{ number: contains }, { description: contains }] }, take: 20 }),
-    prisma.item.findMany({ where: { OR: [{ code: contains }, { nameAr: contains }, { nameEn: contains }] }, take: 20 })
+    prisma.orm.public.Customer.where((r) => qw(r, { OR: [{ nameAr: contains }, { code: contains }, { email: contains }] })).limit(20).all(),
+    prisma.orm.public.Supplier.where((r) => qw(r, { OR: [{ nameAr: contains }, { code: contains }, { email: contains }] })).limit(20).all(),
+    prisma.orm.public.JournalEntry.where((r) => qw(r, { OR: [{ entryNumber: contains }, { description: contains }, { reference: contains }] })).limit(20).all(),
+    prisma.orm.public.Invoice.where((r) => qw(r, { OR: [{ number: contains }, { notes: contains }] })).limit(20).all(),
+    prisma.orm.public.Payment.where((r) => qw(r, { OR: [{ number: contains }, { description: contains }] })).limit(20).all(),
+    prisma.orm.public.Item.where((r) => qw(r, { OR: [{ code: contains }, { nameAr: contains }, { nameEn: contains }] })).limit(20).all()
   ]);
   ok(res, { query: q, customers, suppliers, journals, invoices, payments, products });
 });
@@ -238,20 +217,13 @@ router.get('/search', async (req: Request, res: Response) => {
 // Accounting aliases
 router.get('/accounts/:id/transactions', async (req: Request, res: Response) => {
   const accountId = parsePositiveInt(req.params.id, 'accountId');
-  const rows = await prisma.journalLine.findMany({
-    where: { accountId },
-    include: { entry: true },
-    orderBy: { entry: { date: 'desc' } }
-  });
+  const rows = await prisma.orm.public.JournalLine.where((r) => qw(r, { accountId })).include('entry').orderBy((r) => r.entry.r.date.desc()).all();
   ok(res, rows);
 });
 
 router.post('/journals/:id/attachments', async (req: Request, res: Response) => {
   const id = parsePositiveInt(req.params.id, 'journalId');
-  const entry = await prisma.journalEntry.update({
-    where: { id },
-    data: { attachmentCount: { increment: 1 } }
-  });
+  const entry = await prisma.orm.public.JournalEntry.where((r) => qw(r, { id })).update({ attachmentCount: { increment: 1 } }).then((r0) => r0!);
   ok(res, { journalId: entry.id, attachmentCount: entry.attachmentCount, fileName: req.body?.fileName ?? null, stored: true });
 });
 
@@ -259,11 +231,7 @@ router.get('/ledger/:accountId', async (req: Request, res: Response) => {
   const accountId = parsePositiveInt(req.params.accountId, 'accountId');
   const fromDate = parseOptionalDate(req.query.fromDate, new Date('2000-01-01'));
   const toDate = parseOptionalDate(req.query.toDate, new Date());
-  const rows = await prisma.journalLine.findMany({
-    where: { accountId, entry: { status: 'POSTED', date: { gte: fromDate, lte: toDate } } },
-    include: { entry: true },
-    orderBy: { entry: { date: 'asc' } }
-  });
+  const rows = await prisma.orm.public.JournalLine.where((r) => qw(r, { accountId, entry: { status: 'POSTED', date: { gte: fromDate, lte: toDate } } })).include('entry').orderBy((r) => r.entry.r.date.asc()).all();
   ok(res, rows);
 });
 
@@ -271,12 +239,8 @@ router.get('/account-statement/:accountId', async (req: Request, res: Response) 
   const accountId = parsePositiveInt(req.params.accountId, 'accountId');
   const fromDate = parseOptionalDate(req.query.fromDate, new Date('2000-01-01'));
   const toDate = parseOptionalDate(req.query.toDate, new Date());
-  const account = await prisma.account.findUnique({ where: { id: accountId } });
-  const lines = await prisma.journalLine.findMany({
-    where: { accountId, entry: { status: 'POSTED', date: { gte: fromDate, lte: toDate } } },
-    include: { entry: true },
-    orderBy: { entry: { date: 'asc' } }
-  });
+  const account = await prisma.orm.public.Account.first({ id: accountId });
+  const lines = await prisma.orm.public.JournalLine.where((r) => qw(r, { accountId, entry: { status: 'POSTED', date: { gte: fromDate, lte: toDate } } })).include('entry').orderBy((r) => r.entry.r.date.asc()).all();
   let running = 0;
   const rows = lines.map((line) => {
     running += Number(line.debit) - Number(line.credit);
@@ -302,21 +266,21 @@ router.get('/account-statement/:accountId', async (req: Request, res: Response) 
 
 router.post('/fiscal-years/:id/close', async (req: Request, res: Response) => {
   const id = parsePositiveInt(req.params.id, 'fiscalYearId');
-  ok(res, await prisma.fiscalYear.update({ where: { id }, data: { status: 'CLOSED' } }));
+  ok(res, await prisma.orm.public.FiscalYear.where((r) => qw(r, { id })).update({ status: 'CLOSED' }).then((r0) => r0!));
 });
 
 router.post('/fiscal-years/:id/open', async (req: Request, res: Response) => {
   const id = parsePositiveInt(req.params.id, 'fiscalYearId');
-  ok(res, await prisma.fiscalYear.update({ where: { id }, data: { status: 'OPEN' } }));
+  ok(res, await prisma.orm.public.FiscalYear.where((r) => qw(r, { id })).update({ status: 'OPEN' }).then((r0) => r0!));
 });
 
 router.post('/year-end-closing/:fiscalYearId/validate', async (req: Request, res: Response) => {
   const fiscalYearId = parsePositiveInt(req.params.fiscalYearId, 'fiscalYearId');
-  const fiscalYear = await prisma.fiscalYear.findUnique({ where: { id: fiscalYearId } });
+  const fiscalYear = await prisma.orm.public.FiscalYear.first({ id: fiscalYearId });
   if (!fiscalYear) throw Errors.notFound('السنة المالية غير موجودة');
   const [draftEntries, openPeriods] = await Promise.all([
-    prisma.journalEntry.count({ where: { status: 'DRAFT', date: { gte: fiscalYear.startDate, lte: fiscalYear.endDate } } }),
-    prisma.accountingPeriod.count({ where: { fiscalYearId, status: 'OPEN' } })
+    prisma.orm.public.JournalEntry.where((r) => qw(r, { status: 'DRAFT', date: { gte: fiscalYear.startDate, lte: fiscalYear.endDate } })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n),
+    prisma.orm.public.AccountingPeriod.where((r) => qw(r, { fiscalYearId, status: 'OPEN' })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n)
   ]);
   ok(res, { fiscalYearId, draftEntries, openPeriods, canClose: draftEntries === 0 && openPeriods === 0 });
 });
@@ -325,14 +289,14 @@ router.post('/year-end-closing/:fiscalYearId/execute', async (req: Request, res:
   const fiscalYearId = parsePositiveInt(req.params.fiscalYearId, 'fiscalYearId');
   const actorId = Number((req as any).user?.id ?? 1);
 
-  const payload = await prisma.$transaction(async (tx) => {
-    const fiscalYear = await tx.fiscalYear.findUnique({ where: { id: fiscalYearId } });
+  const payload = await prisma.transaction(async (tx) => {{
+    const fiscalYear = await tx.orm.public.FiscalYear.first({ id: fiscalYearId });
     if (!fiscalYear) throw Errors.notFound('????? ??????? ??? ??????');
     if (fiscalYear.status === 'CLOSED') throw Errors.business('????? ??????? ????? ??????');
 
     const [draftEntries, openPeriods] = await Promise.all([
-      tx.journalEntry.count({ where: { status: 'DRAFT', date: { gte: fiscalYear.startDate, lte: fiscalYear.endDate } } }),
-      tx.accountingPeriod.count({ where: { fiscalYearId, status: 'OPEN' } })
+      tx.orm.public.JournalEntry.where((r) => qw(r, { status: 'DRAFT', date: { gte: fiscalYear.startDate, lte: fiscalYear.endDate } })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n),
+      tx.orm.public.AccountingPeriod.where((r) => qw(r, { fiscalYearId, status: 'OPEN' })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n)
     ]);
     if (draftEntries > 0 || openPeriods > 0) throw Errors.business('???? ????? ???????: ???? ?????? ?? ????? ??????');
 
@@ -341,17 +305,14 @@ router.post('/year-end-closing/:fiscalYearId/execute', async (req: Request, res:
     const closingPeriod = closingDate.getUTCMonth() + 1;
 
     const retainedEarnings =
-      (await tx.account.findUnique({ where: { code: '3100' } })) ??
-      (await tx.account.findFirst({ where: { type: 'EQUITY', allowPosting: true, isActive: true }, orderBy: { id: 'asc' } }));
+      (await tx.orm.public.Account.first({ code: '3100' })) ??
+      (await tx.orm.public.Account.orderBy((r) => r.id.asc()).first({ type: 'EQUITY', allowPosting: true, isActive: true }));
     if (!retainedEarnings) throw Errors.business('???? ?????? ??? ???? ???? ????? ?????? ?????');
 
-    const tempAccounts = await tx.account.findMany({
-      where: { type: { in: ['REVENUE', 'EXPENSE'] }, allowPosting: true, isActive: true },
-      select: { id: true, type: true, nameAr: true }
-    });
+    const tempAccounts = await tx.orm.public.Account.where((r) => qw(r, { type: { in: ['REVENUE', 'EXPENSE'] }, allowPosting: true, isActive: true })).select('id', 'type', 'nameAr').all();
     const tempIds = tempAccounts.map((a) => a.id);
     const tempBalances = tempIds.length
-      ? await tx.accountBalance.findMany({ where: { fiscalYear: fiscalYearKey, accountId: { in: tempIds } } })
+      ? await tx.orm.public.AccountBalance.where((r) => qw(r, { fiscalYear: fiscalYearKey, accountId: { in: tempIds } })).all()
       : [];
 
     const tempMap = new Map<number, { debit: number; credit: number }>();
@@ -394,14 +355,9 @@ router.post('/year-end-closing/:fiscalYearId/execute', async (req: Request, res:
     if (closingLines.length) {
       const totalClosing = closingLines.reduce((sum, line) => sum + Number(line.debit), 0);
       const closingYear = closingDate.getUTCFullYear();
-      const latest = await tx.journalEntry.findFirst({
-        where: { entryNumber: { startsWith: `YEC-${closingYear}-` } },
-        select: { entryNumber: true },
-        orderBy: { entryNumber: 'desc' }
-      });
+      const latest = await tx.orm.public.JournalEntry.select('entryNumber').orderBy((r) => r.entryNumber.desc()).first((r) => qw(r, { entryNumber: { startsWith: `YEC-${closingYear}-` } }));
       const entryNumber = buildSequentialNumberFromLatest('YEC', latest?.entryNumber, closingYear);
-      closingEntry = await tx.journalEntry.create({
-        data: {
+      closingEntry = await tx.orm.public.JournalEntry.create({
           entryNumber,
           date: closingDate,
           periodId: null,
@@ -414,18 +370,15 @@ router.post('/year-end-closing/:fiscalYearId/execute', async (req: Request, res:
           createdById: actorId,
           postedById: actorId,
           postedAt: new Date()
-        }
-      });
-      await tx.journalLine.createMany({
-        data: closingLines.map((line, i) => ({
+        });
+      await tx.orm.public.JournalLine.createAll(closingLines.map((line, i) => ({
           entryId: closingEntry.id,
           lineNumber: i + 1,
           accountId: line.accountId,
           description: line.description,
           debit: line.debit,
           credit: line.credit
-        }))
-      });
+        }))).then((rows) => ({ count: rows.length }));
       await applyLedgerLines(tx, closingDate, closingPeriod, closingLines);
     }
 
@@ -435,33 +388,28 @@ router.post('/year-end-closing/:fiscalYearId/execute', async (req: Request, res:
     nextEnd.setUTCFullYear(nextEnd.getUTCFullYear() + 1);
     nextEnd.setUTCDate(nextEnd.getUTCDate() - 1);
 
-    let nextFiscalYear = await tx.fiscalYear.findFirst({ where: { startDate: nextStart } });
+    let nextFiscalYear = await tx.orm.public.FiscalYear.first({ startDate: nextStart });
     if (!nextFiscalYear) {
       const baseName = 'FY-' + nextStart.getUTCFullYear();
       let candidate = baseName;
       let idx = 1;
-      while (await tx.fiscalYear.findUnique({ where: { name: candidate } })) {
+      while (await tx.orm.public.FiscalYear.first({ name: candidate })) {
         candidate = baseName + '-' + idx;
         idx += 1;
       }
-      nextFiscalYear = await tx.fiscalYear.create({
-        data: {
+      nextFiscalYear = await tx.orm.public.FiscalYear.create({
           name: candidate,
           startDate: nextStart,
           endDate: nextEnd,
           status: 'OPEN',
           isCurrent: false
-        }
-      });
+        });
     }
 
-    const permanentAccounts = await tx.account.findMany({
-      where: { type: { in: ['ASSET', 'LIABILITY', 'EQUITY'] }, allowPosting: true, isActive: true },
-      select: { id: true, nameAr: true }
-    });
+    const permanentAccounts = await tx.orm.public.Account.where((r) => qw(r, { type: { in: ['ASSET', 'LIABILITY', 'EQUITY'] }, allowPosting: true, isActive: true })).select('id', 'nameAr').all();
     const permanentIds = permanentAccounts.map((a) => a.id);
     const permanentBalances = permanentIds.length
-      ? await tx.accountBalance.findMany({ where: { fiscalYear: fiscalYearKey, accountId: { in: permanentIds } } })
+      ? await tx.orm.public.AccountBalance.where((r) => qw(r, { fiscalYear: fiscalYearKey, accountId: { in: permanentIds } })).all()
       : [];
 
     const permanentMap = new Map<number, number>();
@@ -484,14 +432,9 @@ router.post('/year-end-closing/:fiscalYearId/execute', async (req: Request, res:
     if (openingLines.length) {
       const totalOpening = openingLines.reduce((sum, line) => sum + Number(line.debit), 0);
       const openingYear = nextStart.getUTCFullYear();
-      const latest = await tx.journalEntry.findFirst({
-        where: { entryNumber: { startsWith: `OPEN-${openingYear}-` } },
-        select: { entryNumber: true },
-        orderBy: { entryNumber: 'desc' }
-      });
+      const latest = await tx.orm.public.JournalEntry.select('entryNumber').orderBy((r) => r.entryNumber.desc()).first((r) => qw(r, { entryNumber: { startsWith: `OPEN-${openingYear}-` } }));
       const entryNumber = buildSequentialNumberFromLatest('OPEN', latest?.entryNumber, openingYear);
-      openingEntry = await tx.journalEntry.create({
-        data: {
+      openingEntry = await tx.orm.public.JournalEntry.create({
           entryNumber,
           date: nextStart,
           periodId: null,
@@ -504,22 +447,19 @@ router.post('/year-end-closing/:fiscalYearId/execute', async (req: Request, res:
           createdById: actorId,
           postedById: actorId,
           postedAt: new Date()
-        }
-      });
-      await tx.journalLine.createMany({
-        data: openingLines.map((line, i) => ({
+        });
+      await tx.orm.public.JournalLine.createAll(openingLines.map((line, i) => ({
           entryId: openingEntry.id,
           lineNumber: i + 1,
           accountId: line.accountId,
           description: line.description,
           debit: line.debit,
           credit: line.credit
-        }))
-      });
+        }))).then((rows) => ({ count: rows.length }));
       await applyLedgerLines(tx, nextStart, nextStart.getUTCMonth() + 1, openingLines);
     }
 
-    const periodsCount = await tx.accountingPeriod.count({ where: { fiscalYearId: nextFiscalYear.id } });
+    const periodsCount = await tx.orm.public.AccountingPeriod.where((r) => qw(r, { fiscalYearId: nextFiscalYear.id })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n);
     if (periodsCount === 0) {
       for (let i = 0; i < 12; i += 1) {
         const startDate = new Date(nextStart);
@@ -527,8 +467,7 @@ router.post('/year-end-closing/:fiscalYearId/execute', async (req: Request, res:
         const endDate = new Date(nextStart);
         endDate.setUTCMonth(endDate.getUTCMonth() + i + 1);
         endDate.setUTCDate(endDate.getUTCDate() - 1);
-        await tx.accountingPeriod.create({
-          data: {
+        await tx.orm.public.AccountingPeriod.create({
             fiscalYearId: nextFiscalYear.id,
             number: i + 1,
             name: 'P' + String(i + 1).padStart(2, '0'),
@@ -536,15 +475,14 @@ router.post('/year-end-closing/:fiscalYearId/execute', async (req: Request, res:
             endDate,
             status: 'OPEN',
             canPost: true
-          }
-        });
+          });
       }
     }
 
-    await tx.fiscalYear.updateMany({ data: { isCurrent: false } });
+    await tx.orm.public.FiscalYear.where((r) => qw(r, {})).updateAndCount({ isCurrent: false }).then((n0) => ({ count: n0 }));
     const [closedYear, openedYear] = await Promise.all([
-      tx.fiscalYear.update({ where: { id: fiscalYearId }, data: { status: 'CLOSED', isCurrent: false } }),
-      tx.fiscalYear.update({ where: { id: nextFiscalYear.id }, data: { status: 'OPEN', isCurrent: true } })
+      tx.orm.public.FiscalYear.where((r) => qw(r, { id: fiscalYearId })).update({ status: 'CLOSED', isCurrent: false }).then((r0) => r0!),
+      tx.orm.public.FiscalYear.where((r) => qw(r, { id: nextFiscalYear.id })).update({ status: 'OPEN', isCurrent: true }).then((r0) => r0!)
     ]);
 
     return {
@@ -553,7 +491,7 @@ router.post('/year-end-closing/:fiscalYearId/execute', async (req: Request, res:
       closingEntry,
       openingEntry
     };
-  });
+  }});
 
   ok(
     res,
@@ -573,23 +511,22 @@ router.post('/year-end-closing/:fiscalYearId/execute', async (req: Request, res:
 // Customers / Suppliers extended views
 router.get('/customers/:id/invoices', async (req: Request, res: Response) => {
   const id = parsePositiveInt(req.params.id, 'customerId');
-  ok(res, await prisma.invoice.findMany({ where: { customerId: id, type: 'SALES' }, orderBy: { id: 'desc' } }));
+  ok(res, await prisma.orm.public.Invoice.where((r) => qw(r, { customerId: id, type: 'SALES' })).orderBy((r) => r.id.desc()).all());
 });
 
 router.get('/customers/:id/payments', async (req: Request, res: Response) => {
   const id = parsePositiveInt(req.params.id, 'customerId');
-  ok(res, await prisma.payment.findMany({ where: { customerId: id, type: 'RECEIPT' }, orderBy: { id: 'desc' } }));
+  ok(res, await prisma.orm.public.Payment.where((r) => qw(r, { customerId: id, type: 'RECEIPT' })).orderBy((r) => r.id.desc()).all());
 });
 
 router.get('/customers/:id/contacts', async (req: Request, res: Response) => {
   const id = parsePositiveInt(req.params.id, 'customerId');
-  ok(res, await prisma.contact.findMany({ where: { customerId: id }, orderBy: { id: 'desc' } }));
+  ok(res, await prisma.orm.public.Contact.where((r) => qw(r, { customerId: id })).orderBy((r) => r.id.desc()).all());
 });
 
 router.post('/customers/:id/contacts', async (req: Request, res: Response) => {
   const id = parsePositiveInt(req.params.id, 'customerId');
-  const row = await prisma.contact.create({
-    data: {
+  const row = await prisma.orm.public.Contact.create({
       customerId: id,
       name: String(req.body?.name ?? ''),
       position: req.body?.position ?? null,
@@ -597,30 +534,28 @@ router.post('/customers/:id/contacts', async (req: Request, res: Response) => {
       mobile: req.body?.mobile ?? null,
       email: req.body?.email ?? null,
       isPrimary: Boolean(req.body?.isPrimary)
-    }
-  });
+    });
   ok(res, row, undefined, 201);
 });
 
 router.get('/suppliers/:id/invoices', async (req: Request, res: Response) => {
   const id = parsePositiveInt(req.params.id, 'supplierId');
-  ok(res, await prisma.invoice.findMany({ where: { supplierId: id, type: 'PURCHASE' }, orderBy: { id: 'desc' } }));
+  ok(res, await prisma.orm.public.Invoice.where((r) => qw(r, { supplierId: id, type: 'PURCHASE' })).orderBy((r) => r.id.desc()).all());
 });
 
 router.get('/suppliers/:id/payments', async (req: Request, res: Response) => {
   const id = parsePositiveInt(req.params.id, 'supplierId');
-  ok(res, await prisma.payment.findMany({ where: { supplierId: id, type: 'PAYMENT' }, orderBy: { id: 'desc' } }));
+  ok(res, await prisma.orm.public.Payment.where((r) => qw(r, { supplierId: id, type: 'PAYMENT' })).orderBy((r) => r.id.desc()).all());
 });
 
 router.get('/suppliers/:id/contacts', async (req: Request, res: Response) => {
   const id = parsePositiveInt(req.params.id, 'supplierId');
-  ok(res, await prisma.contact.findMany({ where: { supplierId: id }, orderBy: { id: 'desc' } }));
+  ok(res, await prisma.orm.public.Contact.where((r) => qw(r, { supplierId: id })).orderBy((r) => r.id.desc()).all());
 });
 
 router.post('/suppliers/:id/contacts', async (req: Request, res: Response) => {
   const id = parsePositiveInt(req.params.id, 'supplierId');
-  const row = await prisma.contact.create({
-    data: {
+  const row = await prisma.orm.public.Contact.create({
       supplierId: id,
       name: String(req.body?.name ?? ''),
       position: req.body?.position ?? null,
@@ -628,8 +563,7 @@ router.post('/suppliers/:id/contacts', async (req: Request, res: Response) => {
       mobile: req.body?.mobile ?? null,
       email: req.body?.email ?? null,
       isPrimary: Boolean(req.body?.isPrimary)
-    }
-  });
+    });
   ok(res, row, undefined, 201);
 });
 
@@ -641,10 +575,7 @@ router.get('/sales-invoices', async (req: Request, res: Response) => {
 
 router.get('/sales-invoices/:id', async (req: Request, res: Response) => {
   const id = parsePositiveInt(req.params.id, 'invoiceId');
-  const row = await prisma.invoice.findFirst({
-    where: { id, type: 'SALES' },
-    include: { customer: true, lines: true, payments: { include: { payment: true } } }
-  });
+  const row = await prisma.orm.public.Invoice.include('customer').include('lines').include('payments', (inc) => inc.include('payment')).first({ id, type: 'SALES' });
   if (!row) throw Errors.notFound('فاتورة المبيعات غير موجودة');
   ok(res, row);
 });
@@ -676,13 +607,13 @@ router.post('/sales-invoices/:id/cancel', async (req: Request, res: Response) =>
 
 router.get('/sales-invoices/:id/payments', async (req: Request, res: Response) => {
   const id = parsePositiveInt(req.params.id, 'invoiceId');
-  const rows = await prisma.paymentAllocation.findMany({ where: { invoiceId: id }, include: { payment: true }, orderBy: { id: 'desc' } });
+  const rows = await prisma.orm.public.PaymentAllocation.where((r) => qw(r, { invoiceId: id })).include('payment').orderBy((r) => r.id.desc()).all();
   ok(res, rows);
 });
 
 router.get('/sales-invoices/:id/print', async (req: Request, res: Response) => {
   const id = parsePositiveInt(req.params.id, 'invoiceId');
-  const invoice = await prisma.invoice.findUnique({ where: { id }, include: { customer: true, lines: true } });
+  const invoice = await prisma.orm.public.Invoice.include('customer').include('lines').first({ id });
   if (!invoice || invoice.type !== 'SALES') throw Errors.notFound('فاتورة المبيعات غير موجودة');
   ok(res, { invoiceId: id, format: 'PDF', generated: true, pdfUrl: null, invoice });
 });
@@ -701,10 +632,7 @@ router.get('/purchase-invoices', async (req: Request, res: Response) => {
 
 router.get('/purchase-invoices/:id', async (req: Request, res: Response) => {
   const id = parsePositiveInt(req.params.id, 'invoiceId');
-  const row = await prisma.invoice.findFirst({
-    where: { id, type: 'PURCHASE' },
-    include: { supplier: true, lines: true, payments: { include: { payment: true } } }
-  });
+  const row = await prisma.orm.public.Invoice.include('supplier').include('lines').include('payments', (inc) => inc.include('payment')).first({ id, type: 'PURCHASE' });
   if (!row) throw Errors.notFound('فاتورة الشراء غير موجودة');
   ok(res, row);
 });
@@ -740,17 +668,12 @@ router.post('/purchase-invoices/:id/receive', async (req: Request, res: Response
   const requestedWarehouseId = req.body?.warehouseId ? Number(req.body.warehouseId) : null;
   const receiveDate = parseOptionalDate(req.body?.date, new Date());
 
-  const result = await prisma.$transaction(async (tx) => {
-    const invoice = await tx.invoice.findFirst({
-      where: { id, type: 'PURCHASE' },
-      include: { lines: true }
-    });
+  const result = await prisma.transaction(async (tx) => {{
+    const invoice = await tx.orm.public.Invoice.include('lines').first({ id, type: 'PURCHASE' });
     if (!invoice) throw Errors.notFound('فاتورة الشراء غير موجودة');
     if (invoice.status !== 'ISSUED') throw Errors.business('يمكن استلام بضائع فاتورة شراء معتمدة فقط');
 
-    const existing = await tx.purchaseReceipt.findFirst({
-      where: { notes: { contains: `invoiceId=${id};` } }
-    });
+    const existing = await tx.orm.public.PurchaseReceipt.first((r) => qw(r, { notes: { contains: `invoiceId=${id};` } }));
     if (existing) {
       return { invoiceId: id, received: true, duplicate: true, receipt: existing, stockMovements: 0 };
     }
@@ -758,20 +681,19 @@ router.post('/purchase-invoices/:id/receive', async (req: Request, res: Response
     const itemLines = invoice.lines.filter((line) => Number(line.itemId ?? 0) > 0 && Number(line.quantity ?? 0) > 0);
     let warehouseId = requestedWarehouseId;
     if (!warehouseId && itemLines.length) {
-      const defaultWarehouse = await tx.warehouse.findFirst({ orderBy: { id: 'asc' } });
+      const defaultWarehouse = await tx.orm.public.Warehouse.orderBy((r) => r.id.asc()).first;
       warehouseId = defaultWarehouse?.id ?? null;
     }
     if (itemLines.length && !warehouseId) throw Errors.validation('warehouseId مطلوب لاستلام الأصناف المخزنية');
 
     if (warehouseId) {
-      const warehouse = await tx.warehouse.findUnique({ where: { id: warehouseId } });
+      const warehouse = await tx.orm.public.Warehouse.first({ id: warehouseId });
       if (!warehouse) throw Errors.notFound('المستودع غير موجود');
     }
 
-    const receiptCount = await tx.purchaseReceipt.count();
+    const receiptCount = await tx.orm.public.PurchaseReceipt.aggregate((a) => ({ n: a.count() })).then((r0) => r0.n);
     const receiptNumber = buildSequentialNumber('PRCV', receiptCount, receiveDate.getUTCFullYear());
-    const receipt = await tx.purchaseReceipt.create({
-      data: {
+    const receipt = await tx.orm.public.PurchaseReceipt.create({
         number: receiptNumber,
         supplierId: invoice.supplierId,
         warehouseId,
@@ -779,8 +701,7 @@ router.post('/purchase-invoices/:id/receive', async (req: Request, res: Response
         status: 'RECEIVED',
         notes: `invoiceId=${id};by=${actorId}`,
         lines: invoice.lines as any
-      }
-    });
+      });
 
     let stockMovements = 0;
     for (const line of itemLines) {
@@ -789,8 +710,7 @@ router.post('/purchase-invoices/:id/receive', async (req: Request, res: Response
       const unitCost = Number(line.unitPrice ?? 0);
       const totalCost = quantity * unitCost;
 
-      await tx.stockMovement.create({
-        data: {
+      await tx.orm.public.StockMovement.create({
           date: receiveDate,
           type: 'PURCHASE_RECEIPT',
           reference: invoice.number,
@@ -800,54 +720,39 @@ router.post('/purchase-invoices/:id/receive', async (req: Request, res: Response
           unitCost,
           totalCost,
           notes: `استلام فاتورة شراء ${invoice.number}`
-        }
-      });
+        });
 
-      const existingBalance = await tx.stockBalance.findFirst({
-        where: { itemId, warehouseId: Number(warehouseId), locationId: null }
-      });
+      const existingBalance = await tx.orm.public.StockBalance.first((r) => qw(r, { itemId, warehouseId: Number(warehouseId), locationId: null }));
       const nextQty = Number(existingBalance?.quantity ?? 0) + quantity;
       const nextValue = Number(existingBalance?.value ?? 0) + totalCost;
       const nextAvgCost = Math.abs(nextQty) < 0.000001 ? 0 : nextValue / nextQty;
 
       if (existingBalance) {
-        await tx.stockBalance.update({
-          where: { id: existingBalance.id },
-          data: { quantity: nextQty, value: nextValue, avgCost: nextAvgCost }
-        });
+        await tx.orm.public.StockBalance.where((r) => qw(r, { id: existingBalance.id })).update({ quantity: nextQty, value: nextValue, avgCost: nextAvgCost }).then((r0) => r0!);
       } else {
-        await tx.stockBalance.create({
-          data: { itemId, warehouseId: Number(warehouseId), locationId: null, quantity: nextQty, value: nextValue, avgCost: nextAvgCost }
-        });
+        await tx.orm.public.StockBalance.create({ itemId, warehouseId: Number(warehouseId), locationId: null, quantity: nextQty, value: nextValue, avgCost: nextAvgCost });
       }
 
-      await tx.item.update({
-        where: { id: itemId },
-        data: {
+      await tx.orm.public.Item.where((r) => qw(r, { id: itemId })).update({
           onHandQty: { increment: quantity },
           inventoryValue: { increment: totalCost }
-        }
-      });
+        }).then((r0) => r0!);
 
       stockMovements += 1;
     }
 
     return { invoiceId: id, received: true, duplicate: false, receipt, stockMovements };
-  });
+  }});
 
   ok(res, result, undefined, 202);
 });
 
 async function paymentAllocationsOnly(paymentId: number) {
-  return prisma.paymentAllocation.findMany({
-    where: { paymentId },
-    include: { invoice: true },
-    orderBy: { id: 'desc' }
-  });
+  return prisma.orm.public.PaymentAllocation.where((r) => qw(r, { paymentId })).include('invoice').orderBy((r) => r.id.desc()).all();
 }
 
 async function allocatePayment(paymentId: number, allocations: Array<{ invoiceId: number; amount: number }>) {
-  const payment = await prisma.payment.findUnique({ where: { id: paymentId } });
+  const payment = await prisma.orm.public.Payment.first({ id: paymentId });
   if (!payment) throw Errors.notFound('????? ??? ?????');
   if (payment.status !== 'PENDING') throw Errors.business('?? ???? ????? ??? ??? ????');
 
@@ -856,14 +761,14 @@ async function allocatePayment(paymentId: number, allocations: Array<{ invoiceId
     throw Errors.business('????? ??????? ??? ?? ????? ???? ?????');
   }
 
-  await prisma.$transaction(async (tx) => {
+  await prisma.transaction(async (tx) => {{
     for (const alloc of allocations) {
       const invoiceId = Number(alloc.invoiceId);
       const amount = Number(alloc.amount);
       if (!Number.isFinite(invoiceId) || invoiceId <= 0) throw Errors.validation('invoiceId ??? ????');
       if (!Number.isFinite(amount) || amount <= 0) throw Errors.validation('amount ??? ?? ???? ???? ?? ???');
 
-      const invoice = await tx.invoice.findUnique({ where: { id: invoiceId } });
+      const invoice = await tx.orm.public.Invoice.first({ id: invoiceId });
       if (!invoice) throw Errors.notFound('???????? ??? ??????');
 
       const sameEntity =
@@ -876,13 +781,9 @@ async function allocatePayment(paymentId: number, allocations: Array<{ invoiceId
         throw Errors.business('???? ??????? ?????? ??????? ??? ????????');
       }
 
-      await tx.paymentAllocation.upsert({
-        where: { paymentId_invoiceId: { paymentId, invoiceId } },
-        update: { amount },
-        create: { paymentId, invoiceId, amount }
-      });
+      await tx.orm.public.PaymentAllocation.upsert({ create: { paymentId, invoiceId, amount }, update: { amount }, conflictOn: { paymentId_invoiceId: { paymentId, invoiceId } } });
     }
-  });
+  }});
 }
 
 // Payments aliases
@@ -893,10 +794,7 @@ router.get('/payment-receipts', async (req: Request, res: Response) => {
 
 router.get('/payment-receipts/:id', async (req: Request, res: Response) => {
   const id = parsePositiveInt(req.params.id, 'receiptId');
-  const row = await prisma.payment.findFirst({
-    where: { id, type: 'RECEIPT' },
-    include: { customer: true, bank: true, allocations: { include: { invoice: true } } }
-  });
+  const row = await prisma.orm.public.Payment.include('customer').include('bank').include('allocations', (inc) => inc.include('invoice')).first({ id, type: 'RECEIPT' });
   if (!row) throw Errors.notFound('سند القبض غير موجود');
   ok(res, row);
 });
@@ -939,10 +837,7 @@ router.get('/payment-vouchers', async (req: Request, res: Response) => {
 
 router.get('/payment-vouchers/:id', async (req: Request, res: Response) => {
   const id = parsePositiveInt(req.params.id, 'voucherId');
-  const row = await prisma.payment.findFirst({
-    where: { id, type: 'PAYMENT' },
-    include: { supplier: true, bank: true, allocations: { include: { invoice: true } } }
-  });
+  const row = await prisma.orm.public.Payment.include('supplier').include('bank').include('allocations', (inc) => inc.include('invoice')).first({ id, type: 'PAYMENT' });
   if (!row) throw Errors.notFound('سند الدفع غير موجود');
   ok(res, row);
 });
@@ -1017,7 +912,7 @@ router.post('/quotations/:id/email', async (req: any, res: Response) => {
 router.post('/purchase-orders/:id/convert-to-invoice', async (req: Request, res: Response) => {
   const id = parsePositiveInt(req.params.id, 'purchaseOrderId');
   const actorId = Number((req as any).user?.id ?? 1);
-  const row = await prisma.purchaseOrder.findUnique({ where: { id } });
+  const row = await prisma.orm.public.PurchaseOrder.first({ id });
   if (!row) throw Errors.notFound('??? ?????? ??? ?????');
 
   if (row.status === 'DRAFT') {
@@ -1048,7 +943,7 @@ router.get('/reports/sales-by-customer', async (_req: Request, res: Response) =>
 });
 
 router.get('/reports/sales-summary', async (_req: Request, res: Response) => {
-  const rows = await prisma.invoice.findMany({ where: { type: 'SALES' } });
+  const rows = await prisma.orm.public.Invoice.where((r) => qw(r, { type: 'SALES' })).all();
   const summary = rows.reduce(
     (acc, row) => {
       acc.count += 1;
@@ -1062,7 +957,7 @@ router.get('/reports/sales-summary', async (_req: Request, res: Response) => {
 });
 
 router.get('/reports/purchases-summary', async (_req: Request, res: Response) => {
-  const rows = await prisma.invoice.findMany({ where: { type: 'PURCHASE' } });
+  const rows = await prisma.orm.public.Invoice.where((r) => qw(r, { type: 'PURCHASE' })).all();
   const summary = rows.reduce(
     (acc, row) => {
       acc.count += 1;
@@ -1079,104 +974,101 @@ router.get('/reports/purchases-summary', async (_req: Request, res: Response) =>
 router.get('/products', async (req: Request, res: Response) => {
   const { page, limit, skip } = parsePagination(req.query);
   const [rows, total] = await Promise.all([
-    prisma.item.findMany({ skip, take: limit, include: { category: true, unit: true }, orderBy: { id: 'desc' } }),
-    prisma.item.count()
+    prisma.orm.public.Item.include('category').include('unit').orderBy((r) => r.id.desc()).offset(skip).limit(limit).all(),
+    prisma.orm.public.Item.aggregate((a) => ({ n: a.count() })).then((r0) => r0.n)
   ]);
   ok(res, rows, { page, limit, total, pages: Math.max(1, Math.ceil(total / limit)) });
 });
 
 router.get('/products/:id', async (req: Request, res: Response) => {
   const id = parsePositiveInt(req.params.id, 'productId');
-  ok(res, await prisma.item.findUnique({ where: { id }, include: { category: true, unit: true } }));
+  ok(res, await prisma.orm.public.Item.include('category').include('unit').first({ id }));
 });
 
 router.post('/products', async (req: Request, res: Response) => {
-  ok(res, await prisma.item.create({ data: req.body }), undefined, 201);
+  ok(res, await prisma.orm.public.Item.create(req.body), undefined, 201);
 });
 
 router.put('/products/:id', async (req: Request, res: Response) => {
   const id = parsePositiveInt(req.params.id, 'productId');
-  ok(res, await prisma.item.update({ where: { id }, data: req.body }));
+  ok(res, await prisma.orm.public.Item.where((r) => qw(r, { id })).update(req.body).then((r0) => r0!));
 });
 
 router.delete('/products/:id', async (req: Request, res: Response) => {
   const id = parsePositiveInt(req.params.id, 'productId');
-  await prisma.item.delete({ where: { id } });
+  await prisma.orm.public.Item.where((r) => qw(r, { id })).delete().then((r0) => r0!);
   ok(res, { deleted: true });
 });
 
 router.get('/products/:id/stock', async (req: Request, res: Response) => {
   const id = parsePositiveInt(req.params.id, 'productId');
-  ok(res, await prisma.stockBalance.findMany({ where: { itemId: id }, orderBy: { warehouseId: 'asc' } }));
+  ok(res, await prisma.orm.public.StockBalance.where((r) => qw(r, { itemId: id })).orderBy((r) => r.warehouseId.asc()).all());
 });
 
 router.get('/products/:id/transactions', async (req: Request, res: Response) => {
   const id = parsePositiveInt(req.params.id, 'productId');
-  ok(res, await prisma.stockMovement.findMany({ where: { itemId: id }, orderBy: [{ date: 'desc' }, { id: 'desc' }] }));
+  ok(res, await prisma.orm.public.StockMovement.where((r) => qw(r, { itemId: id })).orderBy([(r) => r.date.desc(), (r) => r.id.desc()]).all());
 });
 
 router.get('/product-categories', async (req: Request, res: Response) => {
   const { page, limit, skip } = parsePagination(req.query);
   const [rows, total] = await Promise.all([
-    prisma.itemCategory.findMany({ skip, take: limit, orderBy: [{ code: 'asc' }, { id: 'asc' }] }),
-    prisma.itemCategory.count()
+    prisma.orm.public.ItemCategory.orderBy([(r) => r.code.asc(), (r) => r.id.asc()]).offset(skip).limit(limit).all(),
+    prisma.orm.public.ItemCategory.aggregate((a) => ({ n: a.count() })).then((r0) => r0.n)
   ]);
   ok(res, rows, { page, limit, total, pages: Math.max(1, Math.ceil(total / limit)) });
 });
 
 router.get('/product-categories/:id', async (req: Request, res: Response) => {
   const id = parsePositiveInt(req.params.id, 'categoryId');
-  ok(res, await prisma.itemCategory.findUnique({ where: { id } }));
+  ok(res, await prisma.orm.public.ItemCategory.first({ id }));
 });
 
 router.post('/product-categories', async (req: Request, res: Response) => {
-  ok(res, await prisma.itemCategory.create({ data: req.body }), undefined, 201);
+  ok(res, await prisma.orm.public.ItemCategory.create(req.body), undefined, 201);
 });
 
 router.put('/product-categories/:id', async (req: Request, res: Response) => {
   const id = parsePositiveInt(req.params.id, 'categoryId');
-  ok(res, await prisma.itemCategory.update({ where: { id }, data: req.body }));
+  ok(res, await prisma.orm.public.ItemCategory.where((r) => qw(r, { id })).update(req.body).then((r0) => r0!));
 });
 
 router.delete('/product-categories/:id', async (req: Request, res: Response) => {
   const id = parsePositiveInt(req.params.id, 'categoryId');
-  await prisma.itemCategory.delete({ where: { id } });
+  await prisma.orm.public.ItemCategory.where((r) => qw(r, { id })).delete().then((r0) => r0!);
   ok(res, { deleted: true });
 });
 
 router.get('/uoms', async (req: Request, res: Response) => {
   const { page, limit, skip } = parsePagination(req.query);
   const [rows, total] = await Promise.all([
-    prisma.unit.findMany({ skip, take: limit, orderBy: [{ code: 'asc' }, { id: 'asc' }] }),
-    prisma.unit.count()
+    prisma.orm.public.Unit.orderBy([(r) => r.code.asc(), (r) => r.id.asc()]).offset(skip).limit(limit).all(),
+    prisma.orm.public.Unit.aggregate((a) => ({ n: a.count() })).then((r0) => r0.n)
   ]);
   ok(res, rows, { page, limit, total, pages: Math.max(1, Math.ceil(total / limit)) });
 });
 
 router.post('/uoms', async (req: Request, res: Response) => {
-  ok(res, await prisma.unit.create({ data: req.body }), undefined, 201);
+  ok(res, await prisma.orm.public.Unit.create(req.body), undefined, 201);
 });
 
 router.put('/uoms/:id', async (req: Request, res: Response) => {
   const id = parsePositiveInt(req.params.id, 'uomId');
-  ok(res, await prisma.unit.update({ where: { id }, data: req.body }));
+  ok(res, await prisma.orm.public.Unit.where((r) => qw(r, { id })).update(req.body).then((r0) => r0!));
 });
 
 router.delete('/uoms/:id', async (req: Request, res: Response) => {
   const id = parsePositiveInt(req.params.id, 'uomId');
-  await prisma.unit.delete({ where: { id } });
+  await prisma.orm.public.Unit.where((r) => qw(r, { id })).delete().then((r0) => r0!);
   ok(res, { deleted: true });
 });
 
 router.get('/warehouses/:id/stock', async (req: Request, res: Response) => {
   const id = parsePositiveInt(req.params.id, 'warehouseId');
-  const rows = await prisma.stockBalance.findMany({
-    where: { warehouseId: id },
-    orderBy: [{ itemId: 'asc' }]
-  });
+  const rows = await prisma.orm.public.StockBalance.where((r) => qw(r, { warehouseId: id })).orderBy([(r) => r.itemId.asc()]).all();
   const itemIds = Array.from(new Set(rows.map((row) => row.itemId)));
   const items = itemIds.length
-    ? await prisma.item.findMany({ where: { id: { in: itemIds } }, select: { id: true, code: true, nameAr: true, nameEn: true } })
+    ? await prisma.orm.public.Item.where((r) => qw(r, { id: { in: itemIds } })).select('id', 'code', 'nameAr', 'nameEn').all()
     : [];
   const byItemId = new Map(items.map((item) => [item.id, item]));
   ok(res, {
@@ -1193,8 +1085,8 @@ router.get('/warehouses/:id/stock', async (req: Request, res: Response) => {
 router.get('/inventory-counts', async (req: Request, res: Response) => {
   const { page, limit, skip } = parsePagination(req.query);
   const [rows, total] = await Promise.all([
-    prisma.stockCount.findMany({ skip, take: limit, orderBy: { id: 'desc' } }),
-    prisma.stockCount.count()
+    prisma.orm.public.StockCount.orderBy((r) => r.id.desc()).offset(skip).limit(limit).all(),
+    prisma.orm.public.StockCount.aggregate((a) => ({ n: a.count() })).then((r0) => r0.n)
   ]);
   ok(res, rows, { page, limit, total, pages: Math.max(1, Math.ceil(total / limit)) });
 });
@@ -1202,64 +1094,62 @@ router.get('/inventory-counts', async (req: Request, res: Response) => {
 router.get('/inventory-counts/:id', async (req: Request, res: Response) => {
   const id = parsePositiveInt(req.params.id, 'countId');
   const [header, lines] = await Promise.all([
-    prisma.stockCount.findUnique({ where: { id } }),
-    prisma.stockCountLine.findMany({ where: { stockCountId: id }, orderBy: { id: 'asc' } })
+    prisma.orm.public.StockCount.first({ id }),
+    prisma.orm.public.StockCountLine.where((r) => qw(r, { stockCountId: id })).orderBy((r) => r.id.asc()).all()
   ]);
   ok(res, { ...header, lines });
 });
 
 router.post('/inventory-counts', async (req: Request, res: Response) => {
-  ok(res, await prisma.stockCount.create({ data: req.body }), undefined, 201);
+  ok(res, await prisma.orm.public.StockCount.create(req.body), undefined, 201);
 });
 
 router.put('/inventory-counts/:id/items', async (req: Request, res: Response) => {
   const id = parsePositiveInt(req.params.id, 'countId');
   const items = Array.isArray(req.body?.items) ? req.body.items : [];
-  await prisma.$transaction(async (tx) => {
+  await prisma.transaction(async (tx) => {{
     for (const item of items) {
       const itemId = Number(item.itemId);
       const actualQty = Number(item.actualQty ?? 0);
       const unitCost = Number(item.unitCost ?? 0);
-      await tx.stockCountLine.create({
-        data: {
+      await tx.orm.public.StockCountLine.create({
           stockCountId: id,
           itemId,
           theoreticalQty: Number(item.theoreticalQty ?? 0),
           actualQty,
           unitCost
-        }
-      });
+        });
     }
-  });
+  }});
   ok(res, { updated: true });
 });
 
 router.post('/inventory-counts/:id/complete', async (req: Request, res: Response) => {
   const id = parsePositiveInt(req.params.id, 'countId');
-  ok(res, await prisma.stockCount.update({ where: { id }, data: { status: 'APPROVED' } }));
+  ok(res, await prisma.orm.public.StockCount.where((r) => qw(r, { id })).update({ status: 'APPROVED' }).then((r0) => r0!));
 });
 
 router.get('/inventory-transactions', async (req: Request, res: Response) => {
   const { page, limit, skip } = parsePagination(req.query);
   const [rows, total] = await Promise.all([
-    prisma.stockMovement.findMany({ skip, take: limit, orderBy: [{ date: 'desc' }, { id: 'desc' }] }),
-    prisma.stockMovement.count()
+    prisma.orm.public.StockMovement.orderBy([(r) => r.date.desc(), (r) => r.id.desc()]).offset(skip).limit(limit).all(),
+    prisma.orm.public.StockMovement.aggregate((a) => ({ n: a.count() })).then((r0) => r0.n)
   ]);
   ok(res, rows, { page, limit, total, pages: Math.max(1, Math.ceil(total / limit)) });
 });
 
 router.post('/inventory-transactions', async (req: Request, res: Response) => {
-  ok(res, await prisma.stockMovement.create({ data: req.body }), undefined, 201);
+  ok(res, await prisma.orm.public.StockMovement.create(req.body), undefined, 201);
 });
 
 router.get('/reports/inventory-valuation', async (_req: Request, res: Response) => {
-  const items = await prisma.item.findMany({ orderBy: { code: 'asc' } });
+  const items = await prisma.orm.public.Item.orderBy((r) => r.code.asc()).all();
   const totalValue = items.reduce((s, i) => s + Number(i.inventoryValue), 0);
   ok(res, { totalValue, items });
 });
 
 router.get('/reports/low-stock', async (_req: Request, res: Response) => {
-  const rows = await prisma.item.findMany({ where: { isActive: true }, orderBy: { code: 'asc' } });
+  const rows = await prisma.orm.public.Item.where((r) => qw(r, { isActive: true })).orderBy((r) => r.code.asc()).all();
   ok(
     res,
     rows.filter((r) => Number(r.onHandQty) <= Number(r.reorderPoint))
@@ -1292,71 +1182,67 @@ router.get('/reports/comparative-income-statement', async (req: Request, res: Re
 });
 
 router.get('/custom-reports', async (_req: Request, res: Response) => {
-  ok(res, await prisma.savedReport.findMany({ orderBy: { id: 'desc' } }));
+  ok(res, await prisma.orm.public.SavedReport.orderBy((r) => r.id.desc()).all());
 });
 
 router.get('/custom-reports/:id/run', async (req: Request, res: Response) => {
   const id = parsePositiveInt(req.params.id, 'reportId');
-  const row = await prisma.savedReport.findUnique({ where: { id } });
+  const row = await prisma.orm.public.SavedReport.first({ id });
   if (!row) throw Errors.notFound('التقرير غير موجود');
   ok(res, { report: row, result: [], executedAt: new Date().toISOString() });
 });
 
 router.post('/custom-reports', async (req: Request, res: Response) => {
-  ok(res, await prisma.savedReport.create({ data: req.body }), undefined, 201);
+  ok(res, await prisma.orm.public.SavedReport.create(req.body), undefined, 201);
 });
 
 router.put('/custom-reports/:id', async (req: Request, res: Response) => {
   const id = parsePositiveInt(req.params.id, 'reportId');
-  ok(res, await prisma.savedReport.update({ where: { id }, data: req.body }));
+  ok(res, await prisma.orm.public.SavedReport.where((r) => qw(r, { id })).update(req.body).then((r0) => r0!));
 });
 
 router.delete('/custom-reports/:id', async (req: Request, res: Response) => {
   const id = parsePositiveInt(req.params.id, 'reportId');
-  await prisma.savedReport.delete({ where: { id } });
+  await prisma.orm.public.SavedReport.where((r) => qw(r, { id })).delete().then((r0) => r0!);
   ok(res, { deleted: true });
 });
 
 router.put('/scheduled-reports/:id', async (req: Request, res: Response) => {
   const id = parsePositiveInt(req.params.id, 'scheduleId');
-  ok(res, await prisma.scheduledReport.update({ where: { id }, data: req.body }));
+  ok(res, await prisma.orm.public.ScheduledReport.where((r) => qw(r, { id })).update(req.body).then((r0) => r0!));
 });
 
 router.delete('/scheduled-reports/:id', async (req: Request, res: Response) => {
   const id = parsePositiveInt(req.params.id, 'scheduleId');
-  await prisma.scheduledReport.delete({ where: { id } });
+  await prisma.orm.public.ScheduledReport.where((r) => qw(r, { id })).delete().then((r0) => r0!);
   ok(res, { deleted: true });
 });
 
 router.get('/reports/abc-analysis', async (_req: Request, res: Response) => {
-  const items = await prisma.item.findMany({ orderBy: { inventoryValue: 'desc' }, take: 300 });
+  const items = await prisma.orm.public.Item.orderBy((r) => r.inventoryValue.desc()).limit(300).all();
   ok(res, { totalValue: items.reduce((s, i) => s + Number(i.inventoryValue), 0), rows: items });
 });
 
 router.get('/reports/customer-lifetime-value', async (_req: Request, res: Response) => {
-  const rows = await prisma.customer.findMany({ orderBy: { currentBalance: 'desc' }, take: 300 });
+  const rows = await prisma.orm.public.Customer.orderBy((r) => r.currentBalance.desc()).limit(300).all();
   ok(res, rows.map((c) => ({ id: c.id, code: c.code, nameAr: c.nameAr, estimatedClv: Number(c.currentBalance) * 12 })));
 });
 
 router.get('/reports/sales-forecast', async (req: Request, res: Response) => {
   const branchId = Number(req.query.branchId ?? 0);
-  const rows = await prisma.invoice.findMany({
-    where: {
+  const rows = await prisma.orm.public.Invoice.where((r) => qw(r, {
       type: 'SALES',
       status: { in: ['ISSUED', 'PAID', 'PARTIAL'] },
       ...(branchId > 0 ? { branchId } : {})
-    },
-    select: { date: true, total: true },
-    orderBy: { date: 'asc' }
-  });
+    })).select('date', 'total').orderBy((r) => r.date.asc()).all();
   ok(res, buildSalesForecastFromInvoices(rows));
 });
 
 router.get('/reports/balanced-scorecard', async (_req: Request, res: Response) => {
   const [invoiceCount, journalCount, paymentCount] = await Promise.all([
-    prisma.invoice.count(),
-    prisma.journalEntry.count(),
-    prisma.payment.count()
+    prisma.orm.public.Invoice.aggregate((a) => ({ n: a.count() })).then((r0) => r0.n),
+    prisma.orm.public.JournalEntry.aggregate((a) => ({ n: a.count() })).then((r0) => r0.n),
+    prisma.orm.public.Payment.aggregate((a) => ({ n: a.count() })).then((r0) => r0.n)
   ]);
   ok(res, {
     financial: { target: 85, actual: 80 + Math.min(20, invoiceCount / 50) },
@@ -1367,14 +1253,14 @@ router.get('/reports/balanced-scorecard', async (_req: Request, res: Response) =
 });
 
 router.get('/tax-categories', async (_req: Request, res: Response) => {
-  const row = await prisma.integrationSetting.findUnique({ where: { key: 'tax-categories' } });
+  const row = await prisma.orm.public.IntegrationSetting.first({ key: 'tax-categories' });
   const categories = Array.isArray((row?.settings as any)?.categories) ? (row?.settings as any).categories : [];
   ok(res, categories);
 });
 
 router.get('/tax-categories/:id', async (req: Request, res: Response) => {
   const id = parsePositiveInt(req.params.id, 'categoryId');
-  const row = await prisma.integrationSetting.findUnique({ where: { key: 'tax-categories' } });
+  const row = await prisma.orm.public.IntegrationSetting.first({ key: 'tax-categories' });
   const categories = Array.isArray((row?.settings as any)?.categories) ? (row?.settings as any).categories : [];
   const found = categories.find((c: any) => Number(c.id) === id);
   if (!found) throw Errors.notFound('??? ??????? ??? ??????');
@@ -1382,44 +1268,32 @@ router.get('/tax-categories/:id', async (req: Request, res: Response) => {
 });
 
 router.post('/tax-categories', async (req: Request, res: Response) => {
-  const row = await prisma.integrationSetting.findUnique({ where: { key: 'tax-categories' } });
+  const row = await prisma.orm.public.IntegrationSetting.first({ key: 'tax-categories' });
   const categories = Array.isArray((row?.settings as any)?.categories) ? [...(row?.settings as any).categories] : [];
   const id = categories.length ? Math.max(...categories.map((c: any) => Number(c.id) || 0)) + 1 : 1;
   const created = { id, ...req.body };
   categories.push(created);
-  await prisma.integrationSetting.upsert({
-    where: { key: 'tax-categories' },
-    update: { settings: { categories }, isEnabled: true },
-    create: { key: 'tax-categories', provider: 'SYSTEM', isEnabled: true, settings: { categories } }
-  });
+  await prisma.orm.public.IntegrationSetting.upsert({ create: { key: 'tax-categories', provider: 'SYSTEM', isEnabled: true, settings: { categories } }, update: { settings: { categories }, isEnabled: true }, conflictOn: { key: 'tax-categories' } });
   ok(res, created, undefined, 201);
 });
 
 router.put('/tax-categories/:id', async (req: Request, res: Response) => {
   const id = parsePositiveInt(req.params.id, 'categoryId');
-  const row = await prisma.integrationSetting.findUnique({ where: { key: 'tax-categories' } });
+  const row = await prisma.orm.public.IntegrationSetting.first({ key: 'tax-categories' });
   const categories = Array.isArray((row?.settings as any)?.categories) ? [...(row?.settings as any).categories] : [];
   const idx = categories.findIndex((c: any) => Number(c.id) === id);
   if (idx < 0) throw Errors.notFound('فئة الضريبة غير موجودة');
   categories[idx] = { ...categories[idx], ...req.body, id };
-  await prisma.integrationSetting.upsert({
-    where: { key: 'tax-categories' },
-    update: { settings: { categories }, isEnabled: true },
-    create: { key: 'tax-categories', provider: 'SYSTEM', isEnabled: true, settings: { categories } }
-  });
+  await prisma.orm.public.IntegrationSetting.upsert({ create: { key: 'tax-categories', provider: 'SYSTEM', isEnabled: true, settings: { categories } }, update: { settings: { categories }, isEnabled: true }, conflictOn: { key: 'tax-categories' } });
   ok(res, categories[idx]);
 });
 
 router.delete('/tax-categories/:id', async (req: Request, res: Response) => {
   const id = parsePositiveInt(req.params.id, 'categoryId');
-  const row = await prisma.integrationSetting.findUnique({ where: { key: 'tax-categories' } });
+  const row = await prisma.orm.public.IntegrationSetting.first({ key: 'tax-categories' });
   const categories = Array.isArray((row?.settings as any)?.categories) ? [...(row?.settings as any).categories] : [];
   const next = categories.filter((c: any) => Number(c.id) !== id);
-  await prisma.integrationSetting.upsert({
-    where: { key: 'tax-categories' },
-    update: { settings: { categories: next }, isEnabled: true },
-    create: { key: 'tax-categories', provider: 'SYSTEM', isEnabled: true, settings: { categories: next } }
-  });
+  await prisma.orm.public.IntegrationSetting.upsert({ create: { key: 'tax-categories', provider: 'SYSTEM', isEnabled: true, settings: { categories: next } }, update: { settings: { categories: next }, isEnabled: true }, conflictOn: { key: 'tax-categories' } });
   ok(res, { deleted: true });
 });
 
@@ -1452,16 +1326,12 @@ router.post('/tax-declarations/:id/pay', async (req: Request, res: Response) => 
 });
 
 router.get('/zatca/settings', async (_req: Request, res: Response) => {
-  const row = await prisma.integrationSetting.findUnique({ where: { key: 'zatca' } });
+  const row = await prisma.orm.public.IntegrationSetting.first({ key: 'zatca' });
   ok(res, row ?? { key: 'zatca', provider: 'ZATCA', isEnabled: false, status: 'DISABLED', settings: {} });
 });
 
 router.put('/zatca/settings', async (req: Request, res: Response) => {
-  const row = await prisma.integrationSetting.upsert({
-    where: { key: 'zatca' },
-    update: { provider: 'ZATCA', isEnabled: Boolean(req.body?.isEnabled), status: req.body?.isEnabled ? 'ACTIVE' : 'DISABLED', settings: req.body ?? {} },
-    create: { key: 'zatca', provider: 'ZATCA', isEnabled: Boolean(req.body?.isEnabled), status: req.body?.isEnabled ? 'ACTIVE' : 'DISABLED', settings: req.body ?? {} }
-  });
+  const row = await prisma.orm.public.IntegrationSetting.upsert({ create: { key: 'zatca', provider: 'ZATCA', isEnabled: Boolean(req.body?.isEnabled), status: req.body?.isEnabled ? 'ACTIVE' : 'DISABLED', settings: req.body ?? {} }, update: { provider: 'ZATCA', isEnabled: Boolean(req.body?.isEnabled), status: req.body?.isEnabled ? 'ACTIVE' : 'DISABLED', settings: req.body ?? {} }, conflictOn: { key: 'zatca' } });
   ok(res, row);
 });
 
@@ -1470,12 +1340,12 @@ router.post('/zatca/test-connection', async (_req: Request, res: Response) => {
 });
 
 router.get('/zatca/compliance', async (_req: Request, res: Response) => {
-  const row = await prisma.integrationSetting.findUnique({ where: { key: 'zatca' } });
+  const row = await prisma.orm.public.IntegrationSetting.first({ key: 'zatca' });
   ok(res, { enabled: Boolean(row?.isEnabled), status: row?.status ?? 'DISABLED', compliant: Boolean(row?.isEnabled) });
 });
 
 router.get('/reports/tax-summary', async (_req: Request, res: Response) => {
-  const rows = await prisma.taxDeclaration.findMany({ orderBy: { id: 'desc' } });
+  const rows = await prisma.orm.public.TaxDeclaration.orderBy((r) => r.id.desc()).all();
   const summary = rows.reduce(
     (acc, row) => {
       acc.declarations += 1;
@@ -1491,22 +1361,22 @@ router.get('/reports/tax-summary', async (_req: Request, res: Response) => {
 
 router.get('/currencies/:code', async (req: Request, res: Response) => {
   const code = String(req.params.code).toUpperCase();
-  ok(res, await prisma.currency.findUnique({ where: { code } }));
+  ok(res, await prisma.orm.public.Currency.first({ code }));
 });
 
 router.put('/currencies/:code', async (req: Request, res: Response) => {
   const code = String(req.params.code).toUpperCase();
-  ok(res, await prisma.currency.update({ where: { code }, data: req.body }));
+  ok(res, await prisma.orm.public.Currency.where((r) => qw(r, { code })).update(req.body).then((r0) => r0!));
 });
 
 router.delete('/currencies/:code', async (req: Request, res: Response) => {
   const code = String(req.params.code).toUpperCase();
-  await prisma.currency.delete({ where: { code } });
+  await prisma.orm.public.Currency.where((r) => qw(r, { code })).delete().then((r0) => r0!);
   ok(res, { deleted: true });
 });
 
 router.get('/exchange-rates/latest', async (_req: Request, res: Response) => {
-  const rows = await prisma.exchangeRate.findMany({ orderBy: [{ currencyCode: 'asc' }, { rateDate: 'desc' }], take: 500 });
+  const rows = await prisma.orm.public.ExchangeRate.orderBy([(r) => r.currencyCode.asc(), (r) => r.rateDate.desc()]).limit(500).all();
   const latest = new Map<string, any>();
   for (const row of rows) if (!latest.has(row.currencyCode)) latest.set(row.currencyCode, row);
   ok(res, Array.from(latest.values()));
@@ -1518,15 +1388,12 @@ router.post('/currency/revaluate', async (req: Request, res: Response) => {
   const asOfDateKey = asOfDate.toISOString().slice(0, 10);
   const minDifference = Math.max(0, Number(req.body?.minDifference ?? 0.01));
 
-  const result = await prisma.$transaction(async (tx) => {
-    const company = await tx.companyProfile.findUnique({ where: { id: 1 } });
+  const result = await prisma.transaction(async (tx) => {{
+    const company = await tx.orm.public.CompanyProfile.first({ id: 1 });
     const baseCurrency = String(req.body?.baseCurrency ?? company?.currency ?? 'SAR').toUpperCase();
     const reference = `FXREV-${asOfDateKey}`;
 
-    const existing = await tx.journalEntry.findFirst({
-      where: { reference, status: 'POSTED' },
-      orderBy: { id: 'desc' }
-    });
+    const existing = await tx.orm.public.JournalEntry.orderBy((r) => r.id.desc()).first({ reference, status: 'POSTED' });
     if (existing) {
       return {
         duplicate: true,
@@ -1539,11 +1406,7 @@ router.post('/currency/revaluate', async (req: Request, res: Response) => {
       };
     }
 
-    const period = await tx.accountingPeriod.findFirst({
-      where: { startDate: { lte: asOfDate }, endDate: { gte: asOfDate }, status: 'OPEN', canPost: true },
-      include: { fiscalYear: true },
-      orderBy: [{ fiscalYearId: 'desc' }, { number: 'desc' }]
-    });
+    const period = await tx.orm.public.AccountingPeriod.include('fiscalYear').orderBy([(r) => r.fiscalYearId.desc(), (r) => r.number.desc()]).first((r) => qw(r, { startDate: { lte: asOfDate }, endDate: { gte: asOfDate }, status: 'OPEN', canPost: true }));
     if (!period || period.fiscalYear.status !== 'OPEN') {
       throw Errors.business('لا توجد فترة محاسبية مفتوحة لتقييم فروقات العملة');
     }
@@ -1552,10 +1415,7 @@ router.post('/currency/revaluate', async (req: Request, res: Response) => {
     const gainAccountId = postingAccounts.stockAdjustmentGainAccountId;
     const lossAccountId = postingAccounts.stockAdjustmentLossAccountId;
 
-    const bankAccounts = await tx.bankAccount.findMany({
-      where: { isActive: true, glAccountId: { not: null }, currency: { not: baseCurrency } },
-      select: { id: true, name: true, currency: true, currentBalance: true, glAccountId: true }
-    });
+    const bankAccounts = await tx.orm.public.BankAccount.where((r) => qw(r, { isActive: true, glAccountId: { not: null }, currency: { not: baseCurrency } })).select('id', 'name', 'currency', 'currentBalance', 'glAccountId').all();
 
     if (!bankAccounts.length) {
       return {
@@ -1570,10 +1430,7 @@ router.post('/currency/revaluate', async (req: Request, res: Response) => {
     }
 
     const currencyCodes = Array.from(new Set(bankAccounts.map((b) => String(b.currency).toUpperCase())));
-    const rates = await tx.exchangeRate.findMany({
-      where: { currencyCode: { in: currencyCodes }, rateDate: { lte: asOfDate } },
-      orderBy: [{ currencyCode: 'asc' }, { rateDate: 'desc' }]
-    });
+    const rates = await tx.orm.public.ExchangeRate.where((r) => qw(r, { currencyCode: { in: currencyCodes }, rateDate: { lte: asOfDate } })).orderBy([(r) => r.currencyCode.asc(), (r) => r.rateDate.desc()]).all();
 
     const ratePairs = new Map<string, { current?: { rate: number; rateDate: Date }; previous?: { rate: number; rateDate: Date } }>();
     for (const row of rates) {
@@ -1670,11 +1527,10 @@ router.post('/currency/revaluate', async (req: Request, res: Response) => {
     }
 
     const year = asOfDate.getUTCFullYear();
-    const seq = await tx.journalEntry.count({ where: { entryNumber: { startsWith: `FXR-${year}-` } } });
+    const seq = await tx.orm.public.JournalEntry.where((r) => qw(r, { entryNumber: { startsWith: `FXR-${year}-` } })).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n);
     const entryNumber = buildSequentialNumber('FXR', seq, year);
 
-    const entry = await tx.journalEntry.create({
-      data: {
+    const entry = await tx.orm.public.JournalEntry.create({
         entryNumber,
         date: asOfDate,
         periodId: period.id,
@@ -1696,8 +1552,7 @@ router.post('/currency/revaluate', async (req: Request, res: Response) => {
             description: line.description
           }))
         }
-      }
-    });
+      });
 
     await applyLedgerLines(
       tx as any,
@@ -1721,14 +1576,14 @@ router.post('/currency/revaluate', async (req: Request, res: Response) => {
         totalCredit
       }
     };
-  });
+  }});
 
   const statusCode = result.duplicate ? 200 : result.entryId ? 202 : 200;
   ok(res, result, undefined, statusCode);
 });
 
 router.get('/reports/currency-differences', async (_req: Request, res: Response) => {
-  const rates = await prisma.exchangeRate.findMany({ orderBy: [{ currencyCode: 'asc' }, { rateDate: 'desc' }], take: 1000 });
+  const rates = await prisma.orm.public.ExchangeRate.orderBy([(r) => r.currencyCode.asc(), (r) => r.rateDate.desc()]).limit(1000).all();
   const byCode = new Map<string, Array<{ rate: number; rateDate: Date }>>();
   for (const row of rates) {
     const arr = byCode.get(row.currencyCode) ?? [];
@@ -1747,14 +1602,11 @@ router.get('/reports/currency-differences', async (_req: Request, res: Response)
 
 router.get('/audit-logs/:id', async (req: Request, res: Response) => {
   const id = parsePositiveInt(req.params.id, 'auditLogId');
-  ok(res, await prisma.auditLog.findUnique({ where: { id } }));
+  ok(res, await prisma.orm.public.AuditLog.first({ id }));
 });
 
 router.get('/internal-control/alerts', async (_req: Request, res: Response) => {
-  const alerts = await prisma.integrationSetting.findMany({
-    where: { key: { startsWith: 'internal-control:alert:' } },
-    orderBy: { id: 'desc' }
-  });
+  const alerts = await prisma.orm.public.IntegrationSetting.where((r) => qw(r, { key: { startsWith: 'internal-control:alert:' } })).orderBy((r) => r.id.desc()).all();
   ok(
     res,
     alerts.map((a) => ({
@@ -1768,35 +1620,35 @@ router.get('/internal-control/alerts', async (_req: Request, res: Response) => {
 
 router.post('/internal-control/resolve/:id', async (req: Request, res: Response) => {
   const id = parsePositiveInt(req.params.id, 'alertId');
-  ok(res, await prisma.integrationSetting.update({ where: { id }, data: { status: 'RESOLVED' } }));
+  ok(res, await prisma.orm.public.IntegrationSetting.where((r) => qw(r, { id })).update({ status: 'RESOLVED' }).then((r0) => r0!));
 });
 
 router.get('/bank-accounts', async (req: Request, res: Response) => {
   const { page, limit, skip } = parsePagination(req.query);
   const [rows, total] = await Promise.all([
-    prisma.bankAccount.findMany({ skip, take: limit, orderBy: { id: 'desc' } }),
-    prisma.bankAccount.count()
+    prisma.orm.public.BankAccount.orderBy((r) => r.id.desc()).offset(skip).limit(limit).all(),
+    prisma.orm.public.BankAccount.aggregate((a) => ({ n: a.count() })).then((r0) => r0.n)
   ]);
   ok(res, rows, { page, limit, total, pages: Math.max(1, Math.ceil(total / limit)) });
 });
 
 router.get('/bank-accounts/:id', async (req: Request, res: Response) => {
   const id = parsePositiveInt(req.params.id, 'bankAccountId');
-  ok(res, await prisma.bankAccount.findUnique({ where: { id } }));
+  ok(res, await prisma.orm.public.BankAccount.first({ id }));
 });
 
 router.post('/bank-accounts', async (req: Request, res: Response) => {
-  ok(res, await prisma.bankAccount.create({ data: req.body }), undefined, 201);
+  ok(res, await prisma.orm.public.BankAccount.create(req.body), undefined, 201);
 });
 
 router.put('/bank-accounts/:id', async (req: Request, res: Response) => {
   const id = parsePositiveInt(req.params.id, 'bankAccountId');
-  ok(res, await prisma.bankAccount.update({ where: { id }, data: req.body }));
+  ok(res, await prisma.orm.public.BankAccount.where((r) => qw(r, { id })).update(req.body).then((r0) => r0!));
 });
 
 router.delete('/bank-accounts/:id', async (req: Request, res: Response) => {
   const id = parsePositiveInt(req.params.id, 'bankAccountId');
-  await prisma.bankAccount.delete({ where: { id } });
+  await prisma.orm.public.BankAccount.where((r) => qw(r, { id })).delete().then((r0) => r0!);
   ok(res, { deleted: true });
 });
 
@@ -1818,10 +1670,7 @@ type BankReconSettings = {
 };
 
 router.get('/bank-reconciliations', async (_req: Request, res: Response) => {
-  const rows = await prisma.integrationSetting.findMany({
-    where: { key: { startsWith: 'bank-reconciliation:' } },
-    orderBy: { id: 'desc' }
-  });
+  const rows = await prisma.orm.public.IntegrationSetting.where((r) => qw(r, { key: { startsWith: 'bank-reconciliation:' } })).orderBy((r) => r.id.desc()).all();
   ok(
     res,
     rows.map((row) => {
@@ -1838,14 +1687,14 @@ router.get('/bank-reconciliations', async (_req: Request, res: Response) => {
 
 router.get('/bank-reconciliations/:id', async (req: Request, res: Response) => {
   const id = parsePositiveInt(req.params.id, 'reconciliationId');
-  const row = await prisma.integrationSetting.findUnique({ where: { key: bankReconKey(id) } });
+  const row = await prisma.orm.public.IntegrationSetting.first((r) => qw(r, { key: bankReconKey(id) }));
   if (!row) throw Errors.notFound('التسوية غير موجودة');
   ok(res, { id, status: row.status ?? 'DRAFT', settings: row.settings ?? {} });
 });
 
 router.post('/bank-reconciliations', async (req: Request, res: Response) => {
   const bankId = parsePositiveInt(req.body?.bankId, 'bankId');
-  const bank = await prisma.bankAccount.findUnique({ where: { id: bankId } });
+  const bank = await prisma.orm.public.BankAccount.first({ id: bankId });
   if (!bank) throw Errors.notFound('?????? ?????? ??? ?????');
   if (String(bank.accountType).toUpperCase() === 'CASHBOX') throw Errors.business('?? ???? ????? ????? ????? ?????? ????');
 
@@ -1859,19 +1708,14 @@ router.post('/bank-reconciliations', async (req: Request, res: Response) => {
     matchedTransactions: []
   };
   const tempKey = `bank-reconciliation:tmp:${Date.now()}:${Math.random().toString(36).slice(2, 10)}`;
-  const created = await prisma.integrationSetting.create({
-    data: { key: tempKey, provider: 'SYSTEM', isEnabled: true, status: 'DRAFT', settings: settings as any }
-  });
+  const created = await prisma.orm.public.IntegrationSetting.create({ key: tempKey, provider: 'SYSTEM', isEnabled: true, status: 'DRAFT', settings: settings as any });
 
   let selectedId: number | null = null;
   let row = created;
   for (let attempt = 0; attempt < 20; attempt += 1) {
     const candidateId = created.id + attempt;
     try {
-      row = await prisma.integrationSetting.update({
-        where: { id: created.id },
-        data: { key: bankReconKey(candidateId) }
-      });
+      row = await prisma.orm.public.IntegrationSetting.where((r) => qw(r, { id: created.id })).update({ key: bankReconKey(candidateId) }).then((r0) => r0!);
       selectedId = candidateId;
       break;
     } catch (error: any) {
@@ -1880,7 +1724,7 @@ router.post('/bank-reconciliations', async (req: Request, res: Response) => {
   }
 
   if (!selectedId) {
-    await prisma.integrationSetting.delete({ where: { id: created.id } });
+    await prisma.orm.public.IntegrationSetting.where((r) => qw(r, { id: created.id })).delete().then((r0) => r0!);
     throw Errors.conflict('تعذر إنشاء تسوية بنكية بسبب تعارض معرف التسوية');
   }
 
@@ -1890,7 +1734,7 @@ router.post('/bank-reconciliations', async (req: Request, res: Response) => {
 router.post('/bank-reconciliations/:id/match', async (req: Request, res: Response) => {
   const id = parsePositiveInt(req.params.id, 'reconciliationId');
   const txId = parsePositiveInt(req.body?.transactionId, 'transactionId');
-  const row = await prisma.integrationSetting.findUnique({ where: { key: bankReconKey(id) } });
+  const row = await prisma.orm.public.IntegrationSetting.first((r) => qw(r, { key: bankReconKey(id) }));
   if (!row) throw Errors.notFound('??????? ??? ??????');
 
   if (String(row.status ?? '').toUpperCase() === 'COMPLETED') {
@@ -1901,7 +1745,7 @@ router.post('/bank-reconciliations/:id/match', async (req: Request, res: Respons
   const bankId = Number(settings.bankId ?? 0);
   if (!Number.isInteger(bankId) || bankId <= 0) throw Errors.validation('bankId ??? ????');
 
-  const transaction = await prisma.bankTransaction.findUnique({ where: { id: txId } });
+  const transaction = await prisma.orm.public.BankTransaction.first({ id: txId });
   if (!transaction) throw Errors.notFound('?????? ??????? ??? ??????');
   if (transaction.bankId !== bankId) throw Errors.business('?????? ??????? ?? ??? ??? ??????');
   if (transaction.isReconciled) throw Errors.business('?????? ??????? ?????? ??????');
@@ -1909,16 +1753,13 @@ router.post('/bank-reconciliations/:id/match', async (req: Request, res: Respons
   const matched = Array.isArray(settings.matchedTransactions) ? [...settings.matchedTransactions] : [];
   if (!matched.includes(txId)) matched.push(txId);
 
-  const updated = await prisma.integrationSetting.update({
-    where: { key: bankReconKey(id) },
-    data: { settings: { ...settings, matchedTransactions: matched } as any, status: 'IN_PROGRESS' }
-  });
+  const updated = await prisma.orm.public.IntegrationSetting.where((r) => qw(r, { key: bankReconKey(id) })).update({ settings: { ...settings, matchedTransactions: matched } as any, status: 'IN_PROGRESS' }).then((r0) => r0!);
   ok(res, { id, matchedTransactions: (updated.settings as any).matchedTransactions ?? [] });
 });
 
 router.post('/bank-reconciliations/:id/complete', async (req: Request, res: Response) => {
   const id = parsePositiveInt(req.params.id, 'reconciliationId');
-  const row = await prisma.integrationSetting.findUnique({ where: { key: bankReconKey(id) } });
+  const row = await prisma.orm.public.IntegrationSetting.first((r) => qw(r, { key: bankReconKey(id) }));
   if (!row) throw Errors.notFound('??????? ??? ??????');
   if (String(row.status ?? '').toUpperCase() === 'COMPLETED') throw Errors.business('??????? ?????? ??????');
 
@@ -1930,11 +1771,11 @@ router.post('/bank-reconciliations/:id/complete', async (req: Request, res: Resp
     ? [...new Set(settings.matchedTransactions.map((x) => Number(x)).filter((x) => Number.isInteger(x) && x > 0))]
     : [];
 
-  const bank = await prisma.bankAccount.findUnique({ where: { id: bankId } });
+  const bank = await prisma.orm.public.BankAccount.first({ id: bankId });
   if (!bank) throw Errors.notFound('?????? ?????? ??? ?????');
 
   const matchedRows = matchedIds.length
-    ? await prisma.bankTransaction.findMany({ where: { id: { in: matchedIds } } })
+    ? await prisma.orm.public.BankTransaction.where((r) => qw(r, { id: { in: matchedIds } })).all()
     : [];
 
   if (matchedRows.some((r) => r.bankId !== bankId)) {
@@ -1946,10 +1787,7 @@ router.post('/bank-reconciliations/:id/complete', async (req: Request, res: Resp
 
   const now = new Date();
   if (matchedIds.length) {
-    await prisma.bankTransaction.updateMany({
-      where: { id: { in: matchedIds } },
-      data: { isReconciled: true, reconciledAt: now }
-    });
+    await prisma.orm.public.BankTransaction.where((r) => qw(r, { id: { in: matchedIds } })).updateAndCount({ isReconciled: true, reconciledAt: now }).then((n0) => ({ count: n0 }));
   }
 
   const totals = await prisma.bankTransaction.aggregate({
@@ -1971,42 +1809,39 @@ router.post('/bank-reconciliations/:id/complete', async (req: Request, res: Resp
     difference: statementBalance - systemBalance
   };
 
-  await prisma.bankAccount.update({ where: { id: bankId }, data: { currentBalance: systemBalance } });
-  const updated = await prisma.integrationSetting.update({
-    where: { key: bankReconKey(id) },
-    data: { status: 'COMPLETED', settings: completedSettings as any }
-  });
+  await prisma.orm.public.BankAccount.where((r) => qw(r, { id: bankId })).update({ currentBalance: systemBalance }).then((r0) => r0!);
+  const updated = await prisma.orm.public.IntegrationSetting.where((r) => qw(r, { key: bankReconKey(id) })).update({ status: 'COMPLETED', settings: completedSettings as any }).then((r0) => r0!);
   ok(res, { id, status: updated.status, settings: updated.settings });
 });
 
 router.get('/cashboxes', async (_req: Request, res: Response) => {
-  ok(res, await prisma.bankAccount.findMany({ where: { accountType: 'CASHBOX' }, orderBy: { id: 'desc' } }));
+  ok(res, await prisma.orm.public.BankAccount.where((r) => qw(r, { accountType: 'CASHBOX' })).orderBy((r) => r.id.desc()).all());
 });
 
 router.get('/cashboxes/:id', async (req: Request, res: Response) => {
   const id = parsePositiveInt(req.params.id, 'cashboxId');
-  ok(res, await prisma.bankAccount.findFirst({ where: { id, accountType: 'CASHBOX' } }));
+  ok(res, await prisma.orm.public.BankAccount.first({ id, accountType: 'CASHBOX' }));
 });
 
 router.post('/cashboxes', async (req: Request, res: Response) => {
-  ok(res, await prisma.bankAccount.create({ data: { ...req.body, accountType: 'CASHBOX' } }), undefined, 201);
+  ok(res, await prisma.orm.public.BankAccount.create({ ...req.body, accountType: 'CASHBOX' }), undefined, 201);
 });
 
 router.put('/cashboxes/:id', async (req: Request, res: Response) => {
   const id = parsePositiveInt(req.params.id, 'cashboxId');
-  ok(res, await prisma.bankAccount.update({ where: { id }, data: { ...req.body, accountType: 'CASHBOX' } }));
+  ok(res, await prisma.orm.public.BankAccount.where((r) => qw(r, { id })).update({ ...req.body, accountType: 'CASHBOX' }).then((r0) => r0!));
 });
 
 router.delete('/cashboxes/:id', async (req: Request, res: Response) => {
   const id = parsePositiveInt(req.params.id, 'cashboxId');
-  await prisma.bankAccount.delete({ where: { id } });
+  await prisma.orm.public.BankAccount.where((r) => qw(r, { id })).delete().then((r0) => r0!);
   ok(res, { deleted: true });
 });
 
 router.get('/cash-transactions', async (req: Request, res: Response) => {
   const where: any = { type: { startsWith: 'CASH_' } };
   if (req.query.cashboxId) where.bankId = Number(req.query.cashboxId);
-  ok(res, await prisma.bankTransaction.findMany({ where, orderBy: [{ date: 'desc' }, { id: 'desc' }] }));
+  ok(res, await prisma.orm.public.BankTransaction.where((r) => qw(r, where)).orderBy([(r) => r.date.desc(), (r) => r.id.desc()]).all());
 });
 
 router.post('/cash-transactions', async (req: Request, res: Response) => {
@@ -2015,7 +1850,7 @@ router.post('/cash-transactions', async (req: Request, res: Response) => {
   const amount = Number(req.body?.amount ?? 0);
   if (amount <= 0) throw Errors.validation('amount ??? ?? ???? ???? ?? ???');
 
-  const cashbox = await prisma.bankAccount.findFirst({ where: { id: cashboxId, accountType: 'CASHBOX' } });
+  const cashbox = await prisma.orm.public.BankAccount.first({ id: cashboxId, accountType: 'CASHBOX' });
   if (!cashbox) throw Errors.notFound('??????? ??? ?????');
   if (!cashbox.isActive) throw Errors.business('??????? ??? ???');
 
@@ -2023,10 +1858,9 @@ router.post('/cash-transactions', async (req: Request, res: Response) => {
   const current = Number(cashbox.currentBalance ?? 0);
   if (isWithdraw && current < amount) throw Errors.business('???? ??????? ??? ???');
 
-  const result = await prisma.$transaction(async (tx) => {
+  const result = await prisma.transaction(async (tx) => {{
     const nextBalance = isWithdraw ? current - amount : current + amount;
-    const row = await tx.bankTransaction.create({
-      data: {
+    const row = await tx.orm.public.BankTransaction.create({
         bankId: cashboxId,
         date: req.body?.date ? new Date(String(req.body.date)) : new Date(),
         description: String(req.body?.description ?? ''),
@@ -2035,11 +1869,10 @@ router.post('/cash-transactions', async (req: Request, res: Response) => {
         credit: isWithdraw ? 0 : amount,
         reference: req.body?.reference ?? null,
         balance: nextBalance
-      }
-    });
-    await tx.bankAccount.update({ where: { id: cashboxId }, data: { currentBalance: nextBalance } });
+      });
+    await tx.orm.public.BankAccount.where((r) => qw(r, { id: cashboxId })).update({ currentBalance: nextBalance }).then((r0) => r0!);
     return { row, balance: nextBalance };
-  });
+  }});
 
   ok(res, result, undefined, 201);
 });
@@ -2050,20 +1883,14 @@ router.get('/reports/bank-statement/:bankAccountId', async (req: Request, res: R
   const toDate = parseOptionalDate(req.query.toDate, new Date());
   ok(
     res,
-    await prisma.bankTransaction.findMany({
-      where: { bankId, date: { gte: fromDate, lte: toDate } },
-      orderBy: [{ date: 'asc' }, { id: 'asc' }]
-    })
+    await prisma.orm.public.BankTransaction.where((r) => qw(r, { bankId, date: { gte: fromDate, lte: toDate } })).orderBy([(r) => r.date.asc(), (r) => r.id.asc()]).all()
   );
 });
 
 router.get('/reports/bank-reconciliation', async (_req: Request, res: Response) => {
   ok(
     res,
-    await prisma.integrationSetting.findMany({
-      where: { key: { startsWith: 'bank-reconciliation:' } },
-      orderBy: { id: 'desc' }
-    })
+    await prisma.orm.public.IntegrationSetting.where((r) => qw(r, { key: { startsWith: 'bank-reconciliation:' } })).orderBy((r) => r.id.desc()).all()
   );
 });
 
@@ -2152,11 +1979,11 @@ router.get('/reports/inventory-movements', async (req: Request, res: Response) =
     if (req.query.fromDate) where.date.gte = new Date(String(req.query.fromDate));
     if (req.query.toDate) where.date.lte = new Date(String(req.query.toDate));
   }
-  ok(res, await prisma.stockMovement.findMany({ where, orderBy: [{ date: 'desc' }, { id: 'desc' }] }));
+  ok(res, await prisma.orm.public.StockMovement.where((r) => qw(r, where)).orderBy([(r) => r.date.desc(), (r) => r.id.desc()]).all());
 });
 
 router.get('/reports/fixed-assets', async (_req: Request, res: Response) => {
-  const rows = await prisma.fixedAsset.findMany({ include: { category: true }, orderBy: { id: 'desc' } });
+  const rows = await prisma.orm.public.FixedAsset.include('category').orderBy((r) => r.id.desc()).all();
   const summary = rows.reduce(
     (acc, row) => {
       acc.assets += 1;
@@ -2171,7 +1998,7 @@ router.get('/reports/fixed-assets', async (_req: Request, res: Response) => {
 });
 
 router.get('/reports/depreciation', async (_req: Request, res: Response) => {
-  const rows = await prisma.depreciationSchedule.findMany({ orderBy: [{ fiscalYear: 'desc' }, { period: 'desc' }] });
+  const rows = await prisma.orm.public.DepreciationSchedule.orderBy([(r) => r.fiscalYear.desc(), (r) => r.period.desc()]).all();
   ok(res, rows);
 });
 
@@ -2179,10 +2006,7 @@ router.get('/assets/:id/depreciation', async (req: Request, res: Response) => {
   const id = parsePositiveInt(req.params.id, 'assetId');
   ok(
     res,
-    await prisma.depreciationSchedule.findMany({
-      where: { assetId: id },
-      orderBy: [{ fiscalYear: 'desc' }, { period: 'desc' }]
-    })
+    await prisma.orm.public.DepreciationSchedule.where((r) => qw(r, { assetId: id })).orderBy([(r) => r.fiscalYear.desc(), (r) => r.period.desc()]).all()
   );
 });
 
@@ -2194,14 +2018,8 @@ router.get('/depreciation-schedules', async (req: Request, res: Response) => {
   if (req.query.status) where.status = String(req.query.status);
   const { page, limit, skip } = parsePagination(req.query);
   const [rows, total] = await Promise.all([
-    prisma.depreciationSchedule.findMany({
-      where,
-      skip,
-      take: limit,
-      orderBy: [{ fiscalYear: 'desc' }, { period: 'desc' }, { id: 'desc' }],
-      include: { asset: true }
-    }),
-    prisma.depreciationSchedule.count({ where })
+    prisma.orm.public.DepreciationSchedule.where((r) => qw(r, where)).include('asset').orderBy([(r) => r.fiscalYear.desc(), (r) => r.period.desc(), (r) => r.id.desc()]).offset(skip).limit(limit).all(),
+    prisma.orm.public.DepreciationSchedule.where((r) => qw(r, where)).aggregate((a) => ({ n: a.count() })).then((r0) => r0.n)
   ]);
   ok(res, rows, { page, limit, total, pages: Math.max(1, Math.ceil(total / limit)) });
 });
@@ -2209,8 +2027,8 @@ router.get('/depreciation-schedules', async (req: Request, res: Response) => {
 router.get('/tickets', async (req: Request, res: Response) => {
   const { page, limit, skip } = parsePagination(req.query);
   const [rows, total] = await Promise.all([
-    prisma.supportTicket.findMany({ skip, take: limit, orderBy: { id: 'desc' } }),
-    prisma.supportTicket.count()
+    prisma.orm.public.SupportTicket.orderBy((r) => r.id.desc()).offset(skip).limit(limit).all(),
+    prisma.orm.public.SupportTicket.aggregate((a) => ({ n: a.count() })).then((r0) => r0.n)
   ]);
   ok(res, rows, { page, limit, total, pages: Math.max(1, Math.ceil(total / limit)) });
 });
@@ -2218,33 +2036,31 @@ router.get('/tickets', async (req: Request, res: Response) => {
 router.get('/tickets/:id', async (req: Request, res: Response) => {
   const id = parsePositiveInt(req.params.id, 'ticketId');
   const [ticket, comments] = await Promise.all([
-    prisma.supportTicket.findUnique({ where: { id } }),
-    prisma.supportTicketMessage.findMany({ where: { ticketId: id }, orderBy: { id: 'asc' } })
+    prisma.orm.public.SupportTicket.first({ id }),
+    prisma.orm.public.SupportTicketMessage.where((r) => qw(r, { ticketId: id })).orderBy((r) => r.id.asc()).all()
   ]);
   ok(res, { ...ticket, comments });
 });
 
 router.post('/tickets', async (req: Request, res: Response) => {
-  ok(res, await prisma.supportTicket.create({ data: req.body }), undefined, 201);
+  ok(res, await prisma.orm.public.SupportTicket.create(req.body), undefined, 201);
 });
 
 router.put('/tickets/:id', async (req: Request, res: Response) => {
   const id = parsePositiveInt(req.params.id, 'ticketId');
-  ok(res, await prisma.supportTicket.update({ where: { id }, data: req.body }));
+  ok(res, await prisma.orm.public.SupportTicket.where((r) => qw(r, { id })).update(req.body).then((r0) => r0!));
 });
 
 router.post('/tickets/:id/comments', async (req: any, res: Response) => {
   const id = parsePositiveInt(req.params.id, 'ticketId');
   ok(
     res,
-    await prisma.supportTicketMessage.create({
-      data: {
+    await prisma.orm.public.SupportTicketMessage.create({
         ticketId: id,
         senderId: Number(req.user.id),
         senderType: 'USER',
         message: String(req.body?.message ?? '')
-      }
-    }),
+      }),
     undefined,
     201
   );
@@ -2252,14 +2068,14 @@ router.post('/tickets/:id/comments', async (req: any, res: Response) => {
 
 router.post('/tickets/:id/assign', async (req: Request, res: Response) => {
   const id = parsePositiveInt(req.params.id, 'ticketId');
-  ok(res, await prisma.supportTicket.update({ where: { id }, data: { assigneeId: Number(req.body?.assigneeId ?? 0) || null } }));
+  ok(res, await prisma.orm.public.SupportTicket.where((r) => qw(r, { id })).update({ assigneeId: Number(req.body?.assigneeId ?? 0) || null }).then((r0) => r0!));
 });
 
 router.patch('/tickets/:id/status', async (req: Request, res: Response) => {
   const id = parsePositiveInt(req.params.id, 'ticketId');
   const status = String(req.body?.status ?? '').trim();
   if (!status) throw Errors.validation('status مطلوب');
-  ok(res, await prisma.supportTicket.update({ where: { id }, data: { status } }));
+  ok(res, await prisma.orm.public.SupportTicket.where((r) => qw(r, { id })).update({ status }).then((r0) => r0!));
 });
 
 router.patch('/opportunities/:id/stage', async (req: Request, res: Response) => {
@@ -2269,46 +2085,46 @@ router.patch('/opportunities/:id/stage', async (req: Request, res: Response) => 
   const data: any = { stage };
   if (req.body?.status) data.status = String(req.body.status);
   if (req.body?.probability !== undefined) data.probability = Number(req.body.probability);
-  ok(res, await prisma.opportunity.update({ where: { id }, data }));
+  ok(res, await prisma.orm.public.Opportunity.where((r) => qw(r, { id })).update(data).then((r0) => r0!));
 });
 
 router.get('/contacts/:id', async (req: Request, res: Response) => {
   const id = parsePositiveInt(req.params.id, 'contactId');
-  ok(res, await prisma.contact.findUnique({ where: { id } }));
+  ok(res, await prisma.orm.public.Contact.first({ id }));
 });
 
 router.put('/expenses/:id', async (req: Request, res: Response) => {
   const id = parsePositiveInt(req.params.id, 'expenseId');
-  ok(res, await prisma.projectExpense.update({ where: { id }, data: req.body }));
+  ok(res, await prisma.orm.public.ProjectExpense.where((r) => qw(r, { id })).update(req.body).then((r0) => r0!));
 });
 
 router.delete('/expenses/:id', async (req: Request, res: Response) => {
   const id = parsePositiveInt(req.params.id, 'expenseId');
-  await prisma.projectExpense.delete({ where: { id } });
+  await prisma.orm.public.ProjectExpense.where((r) => qw(r, { id })).delete().then((r0) => r0!);
   ok(res, { deleted: true });
 });
 
 router.post('/leaves/:id/approve', async (req: any, res: Response) => {
   const id = parsePositiveInt(req.params.id, 'leaveId');
-  const leave = await prisma.leaveRequest.findUnique({ where: { id } });
+  const leave = await prisma.orm.public.LeaveRequest.first({ id });
   if (!leave) throw Errors.notFound('??? ??????? ??? ?????');
   if (leave.status !== 'PENDING') throw Errors.business('???? ?????? ????? ?????? ???');
-  ok(res, await prisma.leaveRequest.update({ where: { id }, data: { status: 'APPROVED', approvedBy: Number(req.user.id), approvedAt: new Date() } }));
+  ok(res, await prisma.orm.public.LeaveRequest.where((r) => qw(r, { id })).update({ status: 'APPROVED', approvedBy: Number(req.user.id), approvedAt: new Date() }).then((r0) => r0!));
 });
 
 router.post('/leaves/:id/reject', async (req: any, res: Response) => {
   const id = parsePositiveInt(req.params.id, 'leaveId');
-  const leave = await prisma.leaveRequest.findUnique({ where: { id } });
+  const leave = await prisma.orm.public.LeaveRequest.first({ id });
   if (!leave) throw Errors.notFound('??? ??????? ??? ?????');
   if (leave.status !== 'PENDING') throw Errors.business('???? ??? ????? ?????? ???');
-  ok(res, await prisma.leaveRequest.update({ where: { id }, data: { status: 'REJECTED', approvedBy: Number(req.user.id), approvedAt: new Date() } }));
+  ok(res, await prisma.orm.public.LeaveRequest.where((r) => qw(r, { id })).update({ status: 'REJECTED', approvedBy: Number(req.user.id), approvedAt: new Date() }).then((r0) => r0!));
 });
 
 router.get('/payroll', async (req: Request, res: Response) => {
   const { page, limit, skip } = parsePagination(req.query);
   const [rows, total] = await Promise.all([
-    prisma.payrollRun.findMany({ skip, take: limit, orderBy: { id: 'desc' } }),
-    prisma.payrollRun.count()
+    prisma.orm.public.PayrollRun.orderBy((r) => r.id.desc()).offset(skip).limit(limit).all(),
+    prisma.orm.public.PayrollRun.aggregate((a) => ({ n: a.count() })).then((r0) => r0.n)
   ]);
   ok(res, rows, { page, limit, total, pages: Math.max(1, Math.ceil(total / limit)) });
 });
@@ -2316,8 +2132,8 @@ router.get('/payroll', async (req: Request, res: Response) => {
 router.get('/payroll/:id', async (req: Request, res: Response) => {
   const id = parsePositiveInt(req.params.id, 'payrollId');
   const [run, lines] = await Promise.all([
-    prisma.payrollRun.findUnique({ where: { id } }),
-    prisma.payrollLine.findMany({ where: { payrollRunId: id }, orderBy: { id: 'asc' } })
+    prisma.orm.public.PayrollRun.first({ id }),
+    prisma.orm.public.PayrollLine.where((r) => qw(r, { payrollRunId: id })).orderBy((r) => r.id.asc()).all()
   ]);
   ok(res, { ...run, lines });
 });
@@ -2327,12 +2143,11 @@ router.post('/payroll/generate', async (req: Request, res: Response) => {
   const month = Number(req.body?.month);
   if (!year || !month) throw Errors.validation('year/month مطلوبة');
   const code = `PAY-${year}-${String(month).padStart(2, '0')}-${Date.now()}`;
-  const employees = await prisma.employee.findMany({ where: { status: 'ACTIVE' } });
+  const employees = await prisma.orm.public.Employee.where((r) => qw(r, { status: 'ACTIVE' })).all();
   const grossTotal = employees.reduce((s, e) => s + Number(e.baseSalary) + Number(e.allowances), 0);
-  const run = await prisma.payrollRun.create({ data: { code, year, month, status: 'DRAFT', grossTotal, netTotal: grossTotal } });
+  const run = await prisma.orm.public.PayrollRun.create({ code, year, month, status: 'DRAFT', grossTotal, netTotal: grossTotal });
   if (employees.length) {
-    await prisma.payrollLine.createMany({
-      data: employees.map((e) => ({
+    await prisma.orm.public.PayrollLine.createAll(employees.map((e) => ({
         payrollRunId: run.id,
         employeeId: e.id,
         basicSalary: e.baseSalary,
@@ -2340,26 +2155,25 @@ router.post('/payroll/generate', async (req: Request, res: Response) => {
         overtime: 0,
         deductions: 0,
         netSalary: Number(e.baseSalary) + Number(e.allowances)
-      }))
-    });
+      }))).then((rows) => ({ count: rows.length }));
   }
   ok(res, run, undefined, 201);
 });
 
 router.post('/payroll/:id/approve', async (req: Request, res: Response) => {
   const id = parsePositiveInt(req.params.id, 'payrollId');
-  const run = await prisma.payrollRun.findUnique({ where: { id } });
+  const run = await prisma.orm.public.PayrollRun.first({ id });
   if (!run) throw Errors.notFound('???? ??????? ??? ?????');
   if (run.status !== 'DRAFT') throw Errors.business('???? ?????? ????? ??????? ???');
-  ok(res, await prisma.payrollRun.update({ where: { id }, data: { status: 'APPROVED' } }));
+  ok(res, await prisma.orm.public.PayrollRun.where((r) => qw(r, { id })).update({ status: 'APPROVED' }).then((r0) => r0!));
 });
 
 router.post('/payroll/:id/post', async (req: Request, res: Response) => {
   const id = parsePositiveInt(req.params.id, 'payrollId');
-  const run = await prisma.payrollRun.findUnique({ where: { id } });
+  const run = await prisma.orm.public.PayrollRun.first({ id });
   if (!run) throw Errors.notFound('???? ??????? ??? ?????');
   if (run.status !== 'APPROVED') throw Errors.business('???? ????? ???? ????? ????? ???');
-  const payrollLines = await prisma.payrollLine.findMany({ where: { payrollRunId: id } });
+  const payrollLines = await prisma.orm.public.PayrollLine.where((r) => qw(r, { payrollRunId: id })).all();
   if (!payrollLines.length) throw Errors.business('لا يمكن ترحيل كشف رواتب بدون موظفين');
 
   const netTotal = roundAmount(payrollLines.reduce((sum, line) => sum + Number(line.netSalary ?? 0), 0));
@@ -2367,10 +2181,7 @@ router.post('/payroll/:id/post', async (req: Request, res: Response) => {
 
   const userId = Number((req as any).user.id);
   const reference = `PAYROLL-RUN-${id}`;
-  const existingEntry = await prisma.journalEntry.findFirst({
-    where: { reference },
-    orderBy: { id: 'desc' }
-  });
+  const existingEntry = await prisma.orm.public.JournalEntry.orderBy((r) => r.id.desc()).first({ reference });
 
   let journalEntryId = existingEntry?.id ?? null;
   if (existingEntry && existingEntry.status !== 'POSTED') {
@@ -2410,19 +2221,16 @@ router.post('/payroll/:id/post', async (req: Request, res: Response) => {
     journalEntryId = postedEntry.id;
   }
 
-  const updated = await prisma.payrollRun.update({
-    where: { id },
-    data: { status: 'POSTED', runDate: new Date(), netTotal }
-  });
+  const updated = await prisma.orm.public.PayrollRun.where((r) => qw(r, { id })).update({ status: 'POSTED', runDate: new Date(), netTotal }).then((r0) => r0!);
   ok(res, { ...updated, journalEntryId, postedAmount: netTotal });
 });
 
 router.post('/payroll/:id/pay', async (req: Request, res: Response) => {
   const id = parsePositiveInt(req.params.id, 'payrollId');
-  const run = await prisma.payrollRun.findUnique({ where: { id } });
+  const run = await prisma.orm.public.PayrollRun.first({ id });
   if (!run) throw Errors.notFound('???? ??????? ??? ?????');
   if (run.status !== 'POSTED') throw Errors.business('???? ??? ???? ????? ???? ???');
-  ok(res, await prisma.payrollRun.update({ where: { id }, data: { status: 'PAID', runDate: new Date() } }));
+  ok(res, await prisma.orm.public.PayrollRun.where((r) => qw(r, { id })).update({ status: 'PAID', runDate: new Date() }).then((r0) => r0!));
 });
 
 router.post('/contracts/:id/approve', async (req: Request, res: Response) => {
@@ -2493,7 +2301,7 @@ router.get('/assistant/suggest', async (req: AuthRequest, res: Response) => {
 });
 
 router.get('/setup-wizard/steps', async (_req: Request, res: Response) => {
-  const row = await prisma.integrationSetting.findUnique({ where: { key: 'setup-wizard' } });
+  const row = await prisma.orm.public.IntegrationSetting.first({ key: 'setup-wizard' });
   const completed = Array.isArray((row?.settings as any)?.completedSteps) ? (row?.settings as any).completedSteps : [];
   const steps = ['company', 'users', 'chart-of-accounts', 'tax', 'opening-balances'];
   ok(res, { steps, completed });
@@ -2501,23 +2309,15 @@ router.get('/setup-wizard/steps', async (_req: Request, res: Response) => {
 
 router.post('/setup-wizard/step/:step', async (req: Request, res: Response) => {
   const step = String(req.params.step);
-  const row = await prisma.integrationSetting.findUnique({ where: { key: 'setup-wizard' } });
+  const row = await prisma.orm.public.IntegrationSetting.first({ key: 'setup-wizard' });
   const completed = Array.isArray((row?.settings as any)?.completedSteps) ? [...(row?.settings as any).completedSteps] : [];
   if (!completed.includes(step)) completed.push(step);
-  const saved = await prisma.integrationSetting.upsert({
-    where: { key: 'setup-wizard' },
-    update: { settings: { completedSteps: completed }, isEnabled: true, status: 'IN_PROGRESS' },
-    create: { key: 'setup-wizard', provider: 'SYSTEM', isEnabled: true, status: 'IN_PROGRESS', settings: { completedSteps: completed } }
-  });
+  const saved = await prisma.orm.public.IntegrationSetting.upsert({ create: { key: 'setup-wizard', provider: 'SYSTEM', isEnabled: true, status: 'IN_PROGRESS', settings: { completedSteps: completed } }, update: { settings: { completedSteps: completed }, isEnabled: true, status: 'IN_PROGRESS' }, conflictOn: { key: 'setup-wizard' } });
   ok(res, { step, completed: (saved.settings as any).completedSteps });
 });
 
 router.post('/setup-wizard/complete', async (_req: Request, res: Response) => {
-  const saved = await prisma.integrationSetting.upsert({
-    where: { key: 'setup-wizard' },
-    update: { status: 'COMPLETED', isEnabled: true },
-    create: { key: 'setup-wizard', provider: 'SYSTEM', isEnabled: true, status: 'COMPLETED', settings: {} }
-  });
+  const saved = await prisma.orm.public.IntegrationSetting.upsert({ create: { key: 'setup-wizard', provider: 'SYSTEM', isEnabled: true, status: 'COMPLETED', settings: {} }, update: { status: 'COMPLETED', isEnabled: true }, conflictOn: { key: 'setup-wizard' } });
   ok(res, { completed: true, setup: saved });
 });
 
